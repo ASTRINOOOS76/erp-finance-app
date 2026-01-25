@@ -326,17 +326,21 @@ elif menu == "🖨️ Αναφορές":
         pl = df_filtered[df_filtered['DocType'].isin(['Income','Expense','Bill'])].groupby(['Category','DocType'])['Amount (Net)'].sum().unstack().fillna(0)
         st.dataframe(pl, use_container_width=True)
 
-# --- 10. TREASURY (ΔΙΟΡΘΩΜΕΝΟ) ---
+# --- 10. TREASURY (ΔΙΟΡΘΩΜΕΝΟ ΜΕ ΑΣΦΑΛΕΙΑ) ---
 elif menu == "🏦 Treasury":
     st.title("🏦 Διαχείριση Ρευστότητας")
     
     # 1. Φιλτράρισμα & Υπολογισμός
     df_pd = df[df['Status'] == 'Paid'].copy()
+    
+    # --- ΔΙΟΡΘΩΣΗ: Μετατροπή στήλης σε string για αποφυγή σφαλμάτων ---
+    df_pd['Bank Account'] = df_pd['Bank Account'].fillna('').astype(str)
+    
     df_pd['Sgn'] = df_pd.apply(lambda x: x['Amount (Gross)'] if x['DocType'] == 'Income' else -x['Amount (Gross)'], axis=1)
     
     # 2. Διαχωρισμός: Ταμείο vs Τράπεζες
-    df_cash = df_pd[df_pd['Bank Account'].str.contains("Ταμείο|Cash", case=False, na=False)]
-    df_bank = df_pd[~df_pd['Bank Account'].str.contains("Ταμείο|Cash", case=False, na=False)]
+    df_cash = df_pd[df_pd['Bank Account'].str.contains("Ταμείο|Cash", case=False)]
+    df_bank = df_pd[~df_pd['Bank Account'].str.contains("Ταμείο|Cash", case=False)]
     
     # 3. Εμφάνιση
     tab1, tab2, tab3 = st.tabs(["💰 Υπόλοιπα (Ξεχωριστά)", "📈 Κίνηση", "➕ Νέα Τράπεζα"])
