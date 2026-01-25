@@ -8,7 +8,7 @@ from datetime import datetime, date
 
 # --- 1. CONFIG & GL SETUP ---
 st.set_page_config(page_title="SalesTree ERP", layout="wide", page_icon="🏢")
-DB_FILE = "erp_master.db"
+DB_FILE = "erp_master_v2.db"
 
 # ΛΕΞΙΚΟ ΛΟΓΑΡΙΑΣΜΩΝ (GL ACCOUNTS)
 GL_ACCOUNTS = {
@@ -84,7 +84,10 @@ init_db()
 
 # --- AUTO IMPORT EXCEL IF EMPTY ---
 conn = get_conn()
-count = conn.execute("SELECT count(*) FROM journal").fetchone()[0]
+try:
+    count = conn.execute("SELECT count(*) FROM journal").fetchone()[0]
+except:
+    count = 0
 conn.close()
 
 if count == 0:
@@ -146,7 +149,10 @@ if menu == "📊 Dashboard":
     df = pd.read_sql("SELECT * FROM journal", conn)
     conn.close()
     
-    df['doc_date'] = pd.to_datetime(df['doc_date'])
+    # Data Cleaning for Dashboard
+    df['doc_date'] = pd.to_datetime(df['doc_date'], errors='coerce')
+    df['amount_net'] = pd.to_numeric(df['amount_net'], errors='coerce').fillna(0)
+    
     cy = datetime.now().year
     df_y = df[df['doc_date'].dt.year == cy]
     
@@ -213,7 +219,7 @@ elif menu == "📝 Νέα Εγγραφή":
             st.session_state.c_gross = 0.0
             st.rerun()
 
-# --- GL MAP PAGE (ΖΗΤΗΘΗΚΕ ΞΑΝΑ) ---
+# --- GL MAP PAGE ---
 elif menu == "🔢 Λογιστικό Σχέδιο":
     st.title("🔢 Λογιστικό Σχέδιο (Chart of Accounts)")
     st.write("Χρησιμοποίησε αυτούς τους κωδικούς για σωστή κατάταξη.")
@@ -228,6 +234,12 @@ elif menu == "📚 Αρχείο & Διαγραφή":
     conn = get_conn()
     df = pd.read_sql("SELECT * FROM journal ORDER BY doc_date DESC", conn)
     conn.close()
+    
+    # --- FIX CRASH: Data Type Cleaning for Editor ---
+    df['doc_date'] = pd.to_datetime(df['doc_date'], errors='coerce')
+    # Make sure numbers are floats, not strings
+    for col in ['amount_net', 'amount_gross', 'vat_amount']:
+        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
     
     st.info("ℹ️ Για **ΔΙΑΓΡΑΦΗ**: Επιλέξτε τη γραμμή, πατήστε το πλήκτρο **Delete** στο πληκτρολόγιο και μετά το κουμπί **'💾 Αποθήκευση Αλλαγών'**.")
     
@@ -264,6 +276,9 @@ elif menu == "💵 Ταμείο & Τράπεζες":
     conn = get_conn()
     df = pd.read_sql("SELECT * FROM journal WHERE status='Paid'", conn)
     conn.close()
+    
+    # Data Cleaning for Treasury
+    df['amount_gross'] = pd.to_numeric(df['amount_gross'], errors='coerce').fillna(0)
     
     df['flow'] = df.apply(lambda x: x['amount_gross'] if x['doc_type']=='Income' else -x['amount_gross'], axis=1)
     df['bank_account'] = df['bank_account'].fillna('Unknown').astype(str)
