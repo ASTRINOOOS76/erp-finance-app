@@ -3,6 +3,7 @@ import pandas as pd
 import sqlite3
 import plotly.express as px
 import os
+import io  # <--- ΑΥΤΟ ΕΛΕΙΠΕ
 from datetime import datetime, date
 
 # --- 1. ΡΥΘΜΙΣΕΙΣ & CSS ---
@@ -56,31 +57,20 @@ def init_db_and_migrate():
                 sheet = "Journal" if "Journal" in xl.sheet_names else xl.sheet_names[0]
                 df = pd.read_excel(file_to_load, sheet_name=sheet)
                 
-                # --- ΕΞΥΠΝΟΣ ΚΑΘΑΡΙΣΜΟΣ ΣΤΗΛΩΝ (ΤΟ FIX ΣΟΥ) ---
-                # 1. Αφαιρούμε κενά από τα ονόματα (π.χ. " DocDate " -> "DocDate")
+                # --- ΕΞΥΠΝΟΣ ΚΑΘΑΡΙΣΜΟΣ ΣΤΗΛΩΝ ---
                 df.columns = df.columns.str.strip()
-                
-                # 2. Χάρτης μετονομασίας (Αν έχεις άλλα ονόματα στο Excel)
                 rename_map = {
-                    'Date': 'DocDate',
-                    'Ημερομηνία': 'DocDate',
-                    'Document Date': 'DocDate',
-                    'PaymentDate': 'Payment Date',
-                    'Ημ. Πληρωμής': 'Payment Date',
-                    'Net': 'Amount (Net)',
-                    'Gross': 'Amount (Gross)',
-                    'Type': 'DocType'
+                    'Date': 'DocDate', 'Ημερομηνία': 'DocDate', 'Document Date': 'DocDate',
+                    'PaymentDate': 'Payment Date', 'Ημ. Πληρωμής': 'Payment Date',
+                    'Net': 'Amount (Net)', 'Gross': 'Amount (Gross)', 'Type': 'DocType'
                 }
                 df.rename(columns=rename_map, inplace=True)
                 
-                # 3. Έλεγχος αν υπάρχει πλέον η στήλη
                 if 'DocDate' not in df.columns:
-                    st.error(f"❌ Σφάλμα: Δεν βρέθηκε η στήλη 'DocDate' (ή 'Date').")
-                    st.write("Οι στήλες που βλέπω στο Excel σου είναι:")
-                    st.write(list(df.columns))
+                    st.error(f"❌ Σφάλμα: Δεν βρέθηκε η στήλη 'DocDate'. Στήλες: {list(df.columns)}")
                     st.stop()
 
-                # Καθαρισμός ημερομηνιών για SQLite
+                # Καθαρισμός ημερομηνιών
                 df['DocDate'] = pd.to_datetime(df['DocDate'], errors='coerce').dt.strftime('%Y-%m-%d')
                 if 'Payment Date' in df.columns:
                     df['Payment Date'] = pd.to_datetime(df['Payment Date'], errors='coerce').dt.strftime('%Y-%m-%d')
@@ -102,8 +92,6 @@ def load_data_from_db():
     conn = get_connection()
     try:
         df = pd.read_sql("SELECT * FROM journal", conn)
-        
-        # Έλεγχος και δημιουργία κενών στηλών αν λείπουν
         required_cols = ['DocDate', 'Payment Date', 'Amount (Net)', 'Amount (Gross)', 'VAT Amount', 
                          'DocType', 'Payment Method', 'Bank Account', 'Status', 'Description', 'Category', 'GL Account']
         
@@ -167,7 +155,7 @@ if not init_db_and_migrate():
 if 'df' not in st.session_state:
     st.session_state.df = load_data_from_db()
 
-# Αν η βάση είναι άδεια ή χαλασμένη
+# Αν η βάση είναι άδεια
 if st.session_state.df.empty:
     st.warning("⚠️ Η βάση είναι κενή ή δεν διαβάστηκε σωστά.")
     if st.button("🗑️ Διαγραφή Βάσης & Επανεκκίνηση"):
@@ -258,6 +246,7 @@ elif menu == "🏦 Treasury":
 elif menu == "📝 Journal":
     st.title("📝 Ημερολόγιο")
     
+    # EXPORT BUTTON (ΔΙΟΡΘΩΜΕΝΟ)
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine='xlsxwriter') as writer: st.session_state.df.to_excel(writer, sheet_name='Journal', index=False)
     st.download_button("💾 Download Excel Backup", buf, "Finance_Backup.xlsx")
