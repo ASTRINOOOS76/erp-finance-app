@@ -6,54 +6,75 @@ import io
 import os
 from datetime import datetime, date
 
-# --- 1. CONFIG & PRO CSS ---
-st.set_page_config(page_title="SalesTree ERP Pro", layout="wide", page_icon="🏦")
-DB_FILE = "erp_pro.db"
+# --- 1. CONFIG ---
+st.set_page_config(page_title="SalesTree ERP", layout="wide", page_icon="🏢")
+DB_FILE = "erp_final.db"
 
+# --- 2. CSS - ΤΟ ΑΠΟΛΥΤΟ ΚΑΘΑΡΟ (ΑΣΠΡΟ/ΜΑΥΡΟ) ---
 st.markdown("""
 <style>
-    /* Γενικό Layout - Clean Professional */
-    .stApp { background-color: #f8fafc; }
-    
-    /* Sidebar - Corporate Dark */
-    [data-testid="stSidebar"] {
-        background-color: #1e293b;
-        border-right: 1px solid #334155;
+    /* Φόντο κάτασπρο */
+    .stApp {
+        background-color: #ffffff;
     }
-    [data-testid="stSidebar"] * { color: #f1f5f9 !important; }
-
-    /* Headings */
-    h1, h2, h3 { color: #0f172a; font-family: 'Segoe UI', sans-serif; font-weight: 700; }
     
-    /* KPIs / Metrics */
+    /* Sidebar Ανοιχτό Γκρι με ΜΑΥΡΑ γράμματα */
+    [data-testid="stSidebar"] {
+        background-color: #f0f2f6;
+        border-right: 2px solid #ccc;
+    }
+    [data-testid="stSidebar"] * {
+        color: #000000 !important;
+        font-weight: 600;
+    }
+
+    /* Κείμενα εφαρμογής - ΜΑΥΡΑ */
+    h1, h2, h3, h4, p, label, div, span, li {
+        color: #000000 !important;
+        font-family: Arial, sans-serif;
+    }
+
+    /* Κουτάκια (Metrics) - Με περίγραμμα για να ξεχωρίζουν */
     div[data-testid="metric-container"] {
         background-color: #ffffff;
-        border-left: 5px solid #0ea5e9; /* Sky Blue */
-        padding: 15px;
-        border-radius: 8px;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        border: 2px solid #000000;
+        padding: 10px;
+        border-radius: 5px;
+        box-shadow: 3px 3px 0px rgba(0,0,0,0.2);
     }
-    div[data-testid="metric-container"] label { color: #64748b !important; font-size: 0.9rem; }
-    div[data-testid="metric-container"] div { color: #0f172a !important; font-weight: 800; }
 
-    /* Buttons */
+    /* Πίνακες - Καθαροί */
+    [data-testid="stDataFrame"] {
+        border: 1px solid #000000;
+    }
+
+    /* Κουμπιά - Μαύρα με άσπρα γράμματα */
     .stButton>button {
-        background-color: #0f172a; color: white; border: none;
-        padding: 0.5rem 1rem; border-radius: 6px; font-weight: 600;
-        transition: all 0.2s;
+        background-color: #000000 !important;
+        color: #ffffff !important;
+        border: 1px solid #000000;
+        font-weight: bold;
     }
-    .stButton>button:hover { background-color: #334155; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
-
-    /* Forms & Inputs */
-    .stTextInput>div>div>input { border-radius: 4px; border: 1px solid #cbd5e1; }
-    .stSelectbox>div>div>div { border-radius: 4px; border: 1px solid #cbd5e1; }
-
-    /* Success/Error Messages */
-    .stAlert { border-radius: 6px; }
+    .stButton>button:hover {
+        background-color: #333333 !important;
+    }
+    
+    /* Tabs */
+    .stTabs [data-baseweb="tab-list"] { gap: 5px; }
+    .stTabs [data-baseweb="tab"] {
+        background-color: #e0e0e0;
+        color: #000000 !important;
+        border: 1px solid #000000;
+        font-weight: bold;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #000000 !important;
+        color: #ffffff !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 2. DATABASE ENGINE (ADVANCED) ---
+# --- 3. DATABASE ENGINE & MIGRATION ---
 def get_conn():
     return sqlite3.connect(DB_FILE, check_same_thread=False)
 
@@ -61,49 +82,82 @@ def init_db():
     conn = get_conn()
     c = conn.cursor()
     
-    # 1. Transactions (Journal)
+    # 1. Πίνακας Κινήσεων
     c.execute('''CREATE TABLE IF NOT EXISTS journal (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         doc_date DATE, doc_no TEXT, doc_type TEXT,
-        counterparty_id INTEGER, counterparty_name TEXT,
-        description TEXT, category TEXT, gl_account INTEGER,
+        counterparty_name TEXT, description TEXT, category TEXT, gl_account INTEGER,
         amount_net REAL, vat_amount REAL, amount_gross REAL,
-        payment_method TEXT, bank_account TEXT, status TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        payment_method TEXT, bank_account TEXT, status TEXT
     )''')
     
-    # 2. Master Data: Partners (Πελάτες/Προμηθευτές)
+    # 2. Πίνακας Πελατών/Προμηθευτών (Master Data)
     c.execute('''CREATE TABLE IF NOT EXISTS partners (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT UNIQUE,
-        type TEXT, -- Customer, Supplier, Both
-        vat_no TEXT,
-        phone TEXT,
-        balance REAL DEFAULT 0
+        name TEXT UNIQUE, type TEXT, vat_no TEXT, phone TEXT
     )''')
     
     conn.commit()
+    
+    # --- MIGRATION LOGIC (ΕΔΩ ΕΙΝΑΙ Η ΔΙΟΡΘΩΣΗ ΓΙΑ ΤΑ ΜΗΔΕΝΙΚΑ ΔΕΔΟΜΕΝΑ) ---
+    # Ελέγχουμε αν είναι άδεια η βάση
+    c.execute("SELECT count(*) FROM journal")
+    count = c.fetchone()[0]
+    
+    if count == 0:
+        # Ψάχνουμε Excel
+        excel_files = [f for f in os.listdir() if f.endswith('.xlsx') and not f.startswith('~$')]
+        if excel_files:
+            try:
+                file_path = excel_files[0]
+                # st.toast(f"⏳ Φόρτωση δεδομένων από: {file_path}...", icon="🔄")
+                
+                xl = pd.ExcelFile(file_path, engine='openpyxl')
+                sheet = "Journal" if "Journal" in xl.sheet_names else xl.sheet_names[0]
+                df = pd.read_excel(file_path, sheet_name=sheet)
+                
+                # Καθαρισμός Στηλών
+                df.columns = df.columns.str.strip()
+                rename_map = {
+                    'Date': 'DocDate', 'Ημερομηνία': 'DocDate', 
+                    'Net': 'Amount (Net)', 'Gross': 'Amount (Gross)', 'Type': 'DocType',
+                    'Counterparty': 'counterparty_name', 'Bank Account': 'bank_account'
+                }
+                df.rename(columns=rename_map, inplace=True)
+                
+                # Default values
+                cols_check = ['amount_net', 'amount_gross', 'vat_amount', 'gl_account']
+                for col in cols_check:
+                    if col not in df.columns and col.title() in df.columns: # Check capitalization
+                         df.rename(columns={col.title(): col}, inplace=True)
+                
+                # Εισαγωγή Journal
+                for _, row in df.iterrows():
+                    d_date = pd.to_datetime(row.get('DocDate'), errors='coerce').strftime('%Y-%m-%d')
+                    
+                    c.execute('''INSERT INTO journal (
+                        doc_date, doc_no, doc_type, counterparty_name, description, category,
+                        amount_net, vat_amount, amount_gross, payment_method, bank_account, status
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''', 
+                    (d_date, str(row.get('DocNo','')), str(row.get('DocType','')), str(row.get('counterparty_name','')), 
+                     str(row.get('Description','')), str(row.get('Category','')), 
+                     float(row.get('Amount (Net)',0)), float(row.get('VAT Amount',0)), float(row.get('Amount (Gross)',0)),
+                     str(row.get('Payment Method','')), str(row.get('bank_account','')), str(row.get('Status',''))))
+                    
+                    # Αυτόματη δημιουργία Πελάτη στο Μητρώο
+                    partner = str(row.get('counterparty_name','')).strip()
+                    if partner and partner != 'nan':
+                        p_type = "Customer" if row.get('DocType') == 'Income' else "Supplier"
+                        c.execute("INSERT OR IGNORE INTO partners (name, type) VALUES (?,?)", (partner, p_type))
+                
+                conn.commit()
+                # st.toast("✅ Επιτυχής φόρτωση δεδομένων!", icon="info")
+            except Exception as e:
+                st.error(f"Migration Error: {e}")
+                
     conn.close()
 
 init_db()
-
-# --- 3. HELPER FUNCTIONS ---
-def get_partners(p_type=None):
-    conn = get_conn()
-    query = "SELECT name FROM partners"
-    if p_type:
-        query += f" WHERE type = '{p_type}' OR type = 'Both'"
-    df = pd.read_sql(query, conn)
-    conn.close()
-    return df['name'].tolist()
-
-def update_partner_balance(name, amount):
-    conn = get_conn()
-    c = conn.cursor()
-    # Αν είναι έσοδο, αυξάνει το υπόλοιπο (μας χρωστάει). Αν έξοδο, μειώνει (τον ξεχρεώνουμε/πιστώνουμε)
-    # Εδώ κάνουμε απλή λογική: Balance = Net Receivables
-    pass # Θα το κάνουμε dynamically στα reports
-    conn.close()
 
 # --- 4. AUTH ---
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
@@ -115,30 +169,29 @@ if not st.session_state.logged_in:
         p = st.text_input("Pass", type="password")
         if st.button("Enter"):
             if u=="admin" and p=="admin123":
-                st.session_state.logged_in=True
-                st.session_state.username=u
-                st.rerun()
-            else: st.error("Access Denied")
+                st.session_state.logged_in=True; st.session_state.username=u; st.rerun()
+            elif u=="user" and p=="1234":
+                st.session_state.logged_in=True; st.session_state.username=u; st.rerun()
+            else: st.error("Lathos kodikos")
     st.stop()
 
-# --- 5. SIDEBAR MENU ---
+# --- 5. SIDEBAR ---
 st.sidebar.title("🚀 SalesTree ERP")
-st.sidebar.caption(f"Logged in as: {st.session_state.username}")
+st.sidebar.write(f"User: **{st.session_state.username}**")
 st.sidebar.divider()
 
-menu = st.sidebar.radio("MODULES", [
-    "📊 Executive Dashboard",
-    "📝 Νέα Συναλλαγή (Voucher)",
-    "📇 Μητρώο (Master Data)",
-    "📚 Γενική Λογιστική (Journal)",
-    "🔍 Καρτέλες & Οφειλές",
-    "💵 Treasury & Banks",
+menu = st.sidebar.radio("ΜΕΝΟΥ", [
+    "📊 Dashboard",
+    "📝 Νέα Εγγραφή (Voucher)",
+    "📇 Μητρώο (Πελάτες)",
+    "📚 Journal (Αρχείο)",
+    "💵 Ταμείο & Τράπεζες",
     "⚙️ Ρυθμίσεις"
 ])
 
-# --- 6. EXECUTIVE DASHBOARD ---
-if menu == "📊 Executive Dashboard":
-    st.title("📊 Financial Overview")
+# --- 6. DASHBOARD ---
+if menu == "📊 Dashboard":
+    st.title("📊 Γενική Εικόνα (Dashboard)")
     
     conn = get_conn()
     df = pd.read_sql("SELECT * FROM journal", conn)
@@ -149,243 +202,137 @@ if menu == "📊 Executive Dashboard":
         cy = datetime.now().year
         df_y = df[df['doc_date'].dt.year == cy]
         
-        # Financial Logic
-        income = df_y[df_y['doc_type']=='Income']['amount_net'].sum()
-        expenses = df_y[df_y['doc_type'].isin(['Expense','Bill'])]['amount_net'].sum()
-        ebitda = income - expenses
-        margin = (ebitda/income*100) if income>0 else 0
+        inc = df_y[df_y['doc_type']=='Income']['amount_net'].sum()
+        exp = df_y[df_y['doc_type'].isin(['Expense','Bill'])]['amount_net'].sum()
+        ebitda = inc - exp
         
-        # Outstanding
-        receivables = df[(df['doc_type']=='Income') & (df['status']=='Unpaid')]['amount_gross'].sum()
-        payables = df[(df['doc_type'].isin(['Expense','Bill'])) & (df['status']=='Unpaid')]['amount_gross'].sum()
-
-        # Top Row - P&L
-        st.subheader("📈 Αποτελέσματα Χρήσης (YTD)")
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Πωλήσεις (Net)", f"€{income:,.0f}", delta="Έσοδα")
-        c2.metric("Λειτουργικά Έξοδα", f"€{expenses:,.0f}", delta="-Έξοδα", delta_color="inverse")
-        c3.metric("EBITDA", f"€{ebitda:,.0f}", delta=f"{margin:.1f}%")
-        c4.metric("ΦΠΑ Προς Απόδοση", f"€{(df_y[df_y['doc_type']=='Income']['vat_amount'].sum() - df_y[df_y['doc_type']!='Income']['vat_amount'].sum()):,.0f}")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Πωλήσεις (Net)", f"€{inc:,.0f}")
+        c2.metric("Έξοδα", f"€{exp:,.0f}")
+        c3.metric("Κέρδος", f"€{ebitda:,.0f}")
 
         st.divider()
-
-        # Bottom Row - Liquidity
-        st.subheader("💧 Ρευστότητα & Οφειλές")
-        c5, c6, c7 = st.columns(3)
-        c5.metric("Απαιτήσεις από Πελάτες", f"€{receivables:,.0f}", "Αναμένεται είσπραξη")
-        c6.metric("Υποχρεώσεις σε Προμηθευτές", f"€{payables:,.0f}", "Πρέπει να πληρωθούν", delta_color="inverse")
         
-        cash = df[df['status']=='Paid'].apply(lambda x: x['amount_gross'] if x['doc_type']=='Income' else -x['amount_gross'], axis=1).sum()
-        c7.metric("Ταμειακά Διαθέσιμα", f"€{cash:,.0f}", "Cash on Hand")
-
-        # Charts
-        c8, c9 = st.columns(2)
-        with c8:
+        c4, c5 = st.columns(2)
+        with c4:
+            st.subheader("Μηνιαία Κίνηση")
             monthly = df_y.copy()
             monthly['mo'] = monthly['doc_date'].dt.strftime('%Y-%m')
             grp = monthly.groupby(['mo','doc_type'])['amount_net'].sum().reset_index()
-            fig = px.bar(grp, x='mo', y='amount_net', color='doc_type', barmode='group', title='Μηνιαία Εξέλιξη', color_discrete_map={'Income':'#0ea5e9', 'Expense':'#ef4444'})
+            # Απλό γράφημα με έντονα χρώματα
+            fig = px.bar(grp, x='mo', y='amount_net', color='doc_type', barmode='group', 
+                         color_discrete_map={'Income':'blue', 'Expense':'red', 'Bill':'red'})
             st.plotly_chart(fig, use_container_width=True)
 
-# --- 7. VOUCHER ENTRY (PROFESSIONAL FORM) ---
-elif menu == "📝 Νέα Συναλλαγή (Voucher)":
-    st.title("📝 Καταχώρηση Παραστατικού")
-    
-    with st.container():
-        st.markdown("### 1. Στοιχεία Παραστατικού")
-        
-        with st.form("voucher_form", clear_on_submit=True):
-            col1, col2, col3, col4 = st.columns(4)
-            
-            d_date = col1.date_input("Ημερομηνία", date.today())
-            d_type = col2.selectbox("Τύπος Κίνησης", ["Income", "Expense", "Bill", "Equity Distribution"])
-            d_no = col3.text_input("Αρ. Παραστατικού (π.χ. INV-001)")
-            
-            # Δυναμική φόρτωση από Master Data
-            partner_type = "Customer" if d_type == "Income" else "Supplier"
-            partners_list = get_partners(partner_type if d_type != "Equity Distribution" else None)
-            
-            if not partners_list:
-                st.warning(f"⚠️ Δεν βρέθηκαν {partner_type}s στο Μητρώο. Πήγαινε στο μενού 'Μητρώο' να τους ανοίξεις!")
-                partner = col4.text_input("Συναλλασσόμενος (Χειροκίνητα)")
-            else:
-                partner = col4.selectbox("Συναλλασσόμενος", partners_list)
-
-            st.markdown("### 2. Οικονομικά Στοιχεία")
-            c1, c2, c3 = st.columns(3)
-            net = c1.number_input("Καθαρή Αξία (€)", min_value=0.0, step=10.0)
-            vat = c2.number_input("ΦΠΑ (€)", min_value=0.0, step=1.0)
-            gross = c3.number_input("Σύνολο (€)", min_value=0.0, step=10.0)
-            
-            st.markdown("### 3. Ταξινόμηση & Πληρωμή")
-            c4, c5, c6 = st.columns(3)
-            category = c4.text_input("Κατηγορία / Κέντρο Κόστους", placeholder="π.χ. Ενοίκια, Πωλήσεις Χονδρικής")
-            pay_method = c5.selectbox("Τρόπος Πληρωμής", ["Επί Πιστώσει", "Μετρητά", "Έμβασμα", "Κάρτα"])
-            
-            # Smart Bank Logic
-            status = "Unpaid" if pay_method == "Επί Πιστώσει" else "Paid"
-            bank_acc = ""
-            if pay_method == "Μετρητά": bank_acc = "Ταμείο Μετρητών"
-            elif pay_method in ["Έμβασμα", "Κάρτα"]: bank_acc = "Όψεως (Main)"
-            
-            descr = st.text_input("Αιτιολογία / Σχόλια")
-
-            # VALIDATION & SUBMIT
-            submitted = st.form_submit_button("💾 Καταχώρηση Εγγραφής")
-            
-            if submitted:
-                # Validation Logic
-                if abs(gross - (net + vat)) > 0.1:
-                    st.error(f"❌ Λάθος Ποσά! Καθαρό ({net}) + ΦΠΑ ({vat}) ≠ Σύνολο ({gross})")
-                elif not partner:
-                    st.error("❌ Λείπει ο Συναλλασσόμενος")
-                else:
-                    # Save Logic
-                    conn = get_conn()
-                    c = conn.cursor()
-                    c.execute('''INSERT INTO journal (
-                        doc_date, doc_no, doc_type, counterparty_name, description, category,
-                        amount_net, vat_amount, amount_gross, payment_method, bank_account, status
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''', 
-                    (d_date, d_no, d_type, partner, descr, category, net, vat, gross, pay_method, bank_acc, status))
-                    conn.commit()
-                    conn.close()
-                    st.success("✅ Το παραστατικό καταχωρήθηκε επιτυχώς!")
-
-# --- 8. MASTER DATA (CRM LIGHT) ---
-elif menu == "📇 Μητρώο (Master Data)":
-    st.title("📇 Μητρώο Συναλλασσόμενων")
-    
-    tab1, tab2 = st.tabs(["📋 Λίστα & Επεξεργασία", "➕ Νέος Συναλλασσόμενος"])
+# --- 7. VOUCHER ENTRY ---
+elif menu == "📝 Νέα Εγγραφή (Voucher)":
+    st.title("📝 Νέα Εγγραφή")
     
     conn = get_conn()
+    partners = [r[0] for r in conn.execute("SELECT name FROM partners ORDER BY name").fetchall()]
+    conn.close()
     
-    with tab1:
-        df_p = pd.read_sql("SELECT * FROM partners", conn)
-        edited_p = st.data_editor(df_p, num_rows="dynamic", use_container_width=True)
-        # Εδώ θα μπορούσαμε να προσθέσουμε Update logic, για το demo είναι read/view mainly
-    
-    with tab2:
-        with st.form("new_partner"):
-            c1, c2 = st.columns(2)
-            name = c1.text_input("Επωνυμία")
-            vat_no = c2.text_input("ΑΦΜ")
-            p_type = st.selectbox("Τύπος", ["Customer", "Supplier", "Both"])
-            phone = st.text_input("Τηλέφωνο")
+    with st.form("voucher", clear_on_submit=True):
+        c1, c2, c3 = st.columns(3)
+        d_date = c1.date_input("Ημερομηνία", date.today())
+        d_type = c2.selectbox("Τύπος", ["Income", "Expense", "Bill"])
+        d_no = c3.text_input("Αρ. Παρ/κου")
+        
+        c4, c5 = st.columns(2)
+        # Αν η λίστα είναι κενή, δώσε text input
+        if partners:
+            partner = c4.selectbox("Συναλλασσόμενος", partners)
+        else:
+            partner = c4.text_input("Συναλλασσόμενος (Νέος)")
             
-            if st.form_submit_button("Δημιουργία Καρτέλας"):
-                try:
-                    c = conn.cursor()
-                    c.execute("INSERT INTO partners (name, type, vat_no, phone) VALUES (?,?,?,?)", (name, p_type, vat_no, phone))
-                    conn.commit()
-                    st.success(f"Ο {name} δημιουργήθηκε!")
-                except Exception as e:
-                    st.error(f"Σφάλμα (π.χ. υπάρχει ήδη): {e}")
+        descr = c5.text_input("Αιτιολογία")
+        
+        c6, c7, c8 = st.columns(3)
+        net = c6.number_input("Καθαρό", step=10.0)
+        vat = c7.number_input("ΦΠΑ", step=1.0)
+        gross = c8.number_input("Σύνολο", step=10.0)
+        
+        c9, c10 = st.columns(2)
+        pay_method = c9.selectbox("Τρόπος", ["Επί Πιστώσει", "Μετρητά", "Τράπεζα"])
+        bank = c10.text_input("Τράπεζα (αν ισχύει)", "Alpha Bank" if pay_method=="Τράπεζα" else "Ταμείο" if pay_method=="Μετρητά" else "")
+        
+        if st.form_submit_button("💾 Αποθήκευση"):
+            status = "Unpaid" if pay_method == "Επί Πιστώσει" else "Paid"
+            conn = get_conn()
+            conn.execute("INSERT INTO journal (doc_date, doc_no, doc_type, counterparty_name, description, amount_net, vat_amount, amount_gross, payment_method, bank_account, status) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                        (d_date, d_no, d_type, partner, descr, net, vat, gross, pay_method, bank, status))
+            # Auto-add partner if new
+            conn.execute("INSERT OR IGNORE INTO partners (name, type) VALUES (?, 'Unknown')", (partner,))
+            conn.commit()
+            conn.close()
+            st.success("Αποθηκεύτηκε!")
+
+# --- 8. MASTER DATA ---
+elif menu == "📇 Μητρώο (Πελάτες)":
+    st.title("📇 Μητρώο Συναλλασσόμενων")
+    conn = get_conn()
+    df = pd.read_sql("SELECT * FROM partners", conn)
+    edited = st.data_editor(df, num_rows="dynamic", use_container_width=True)
+    if st.button("Save Changes"):
+        # Simple Logic: Overwrite table (for demo simplicity)
+        conn.execute("DELETE FROM partners")
+        edited.to_sql('partners', conn, if_exists='append', index=False)
+        st.success("Saved!")
     conn.close()
 
-# --- 9. JOURNAL (GRID) ---
-elif menu == "📚 Γενική Λογιστική (Journal)":
-    st.title("📚 Ημερολόγιο Εγγραφών")
-    
+# --- 9. JOURNAL ---
+elif menu == "📚 Journal (Αρχείο)":
+    st.title("📚 Αρχείο Κινήσεων")
     conn = get_conn()
     df = pd.read_sql("SELECT * FROM journal ORDER BY doc_date DESC", conn)
     conn.close()
     
-    # Advanced Filters
-    with st.expander("🔍 Φίλτρα Αναζήτησης", expanded=True):
-        c1, c2, c3 = st.columns(3)
-        search = c1.text_input("Αναζήτηση (Όνομα/Αιτιολογία)")
-        f_type = c2.multiselect("Τύπος", df['doc_type'].unique())
-        f_status = c3.multiselect("Κατάσταση", ["Paid", "Unpaid"])
-    
+    search = st.text_input("🔍 Αναζήτηση")
     if search:
         df = df[df.astype(str).apply(lambda x: x.str.contains(search, case=False)).any(axis=1)]
-    if f_type:
-        df = df[df['doc_type'].isin(f_type)]
-    if f_status:
-        df = df[df['status'].isin(f_status)]
         
-    st.dataframe(df, use_container_width=True, hide_index=True)
-    
-    # Export
-    buf = io.BytesIO()
-    with pd.ExcelWriter(buf, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False)
-    st.download_button("📥 Εξαγωγή σε Excel", buf, "Journal_Export.xlsx")
+    st.dataframe(df, use_container_width=True)
 
-# --- 10. CUSTOMER/SUPPLIER CARDS (LEDGERS) ---
-elif menu == "🔍 Καρτέλες & Οφειλές":
-    st.title("🔍 Καρτέλες Συναλλασσόμενων")
-    
-    conn = get_conn()
-    partners = pd.read_sql("SELECT name FROM partners", conn)['name'].tolist()
-    
-    # Αν δεν υπάρχουν στο Master Data, πάρε από το Journal
-    if not partners:
-        partners = pd.read_sql("SELECT DISTINCT counterparty_name FROM journal", conn)['counterparty_name'].tolist()
-    
-    sel_partner = st.selectbox("Επιλογή Καρτέλας (Πελάτη/Προμηθευτή)", partners)
-    
-    if sel_partner:
-        df = pd.read_sql(f"SELECT * FROM journal WHERE counterparty_name = '{sel_partner}' ORDER BY doc_date", conn)
-        
-        if not df.empty:
-            # Υπολογισμός Υπολοίπου (Running Balance)
-            # Αν είναι Πελάτης (Income): Χρέωση (+), Πληρωμή (-)
-            # Αν είναι Προμηθευτής (Bill): Πίστωση (+), Πληρωμή (-)
-            # Εδώ κάνουμε μια γενική προσέγγιση: Income/Bill = Αυξάνει χρέος, Payment = Μειώνει
-            
-            balance = 0.0
-            total_debts = 0.0
-            
-            for index, row in df.iterrows():
-                if row['status'] == 'Unpaid':
-                    balance += row['amount_gross']
-            
-            c1, c2 = st.columns(2)
-            c1.metric(f"Τρέχον Υπόλοιπο {sel_partner}", f"€{balance:,.2f}", "Ανοιχτό Ποσό")
-            
-            st.subheader("Αναλυτική Κίνηση")
-            st.dataframe(df[['doc_date', 'doc_type', 'description', 'amount_gross', 'status']], use_container_width=True)
-        else:
-            st.info("Δεν υπάρχουν κινήσεις για αυτόν τον συναλλασσόμενο.")
-    conn.close()
-
-# --- 11. TREASURY ---
-elif menu == "💵 Treasury & Banks":
-    st.title("💵 Διαχείριση Διαθεσίμων")
+# --- 10. TREASURY ---
+elif menu == "💵 Ταμείο & Τράπεζες":
+    st.title("💵 Διαθέσιμα")
     
     conn = get_conn()
     df = pd.read_sql("SELECT * FROM journal WHERE status='Paid'", conn)
     conn.close()
     
-    # Logic: Income adds to bank, Expense subtracts
-    df['flow'] = df.apply(lambda x: x['amount_gross'] if x['doc_type']=='Income' else -x['amount_gross'], axis=1)
+    # Logic
+    df['signed_amount'] = df.apply(lambda x: x['amount_gross'] if x['doc_type']=='Income' else -x['amount_gross'], axis=1)
     
-    # Group by Bank
-    banks = df.groupby('bank_account')['flow'].sum().reset_index()
+    # Split
+    df['bank_account'] = df['bank_account'].fillna('Unknown').astype(str)
+    mask_cash = df['bank_account'].str.contains("Ταμείο|Cash", case=False)
     
-    c1, c2 = st.columns([1, 2])
+    df_cash = df[mask_cash]
+    df_bank = df[~mask_cash]
+    
+    c1, c2 = st.columns(2)
     
     with c1:
-        st.subheader("🏦 Υπόλοιπα Λογαριασμών")
-        for i, row in banks.iterrows():
-            name = row['bank_account'] if row['bank_account'] else "Unassigned"
-            val = row['flow']
-            st.info(f"**{name}**: €{val:,.2f}")
+        st.subheader("💶 Ταμείο (Μετρητά)")
+        if not df_cash.empty:
+            cash_total = df_cash['signed_amount'].sum()
+            st.metric("Σύνολο Μετρητών", f"€{cash_total:,.2f}")
+        else:
+            st.info("Κανένα στοιχείο")
             
     with c2:
-        st.subheader("📉 Ροή Χρήματος (Cashflow)")
-        df['mo'] = pd.to_datetime(df['doc_date']).dt.strftime('%Y-%m')
-        cf = df.groupby('mo')['flow'].sum().reset_index()
-        fig = px.line(cf, x='mo', y='flow', markers=True, title="Καθαρή Ροή ανά Μήνα")
-        st.plotly_chart(fig, use_container_width=True)
+        st.subheader("🏦 Τραπεζικοί Λογαριασμοί")
+        if not df_bank.empty:
+            gr = df_bank.groupby('bank_account')['signed_amount'].sum().reset_index()
+            for i, r in gr.iterrows():
+                st.info(f"**{r['bank_account']}**: €{r['signed_amount']:,.2f}")
+        else:
+            st.info("Κανένα στοιχείο")
 
-# --- 12. SETTINGS ---
+# --- 11. SETTINGS ---
 elif menu == "⚙️ Ρυθμίσεις":
-    st.title("⚙️ Ρυθμίσεις Συστήματος")
-    st.write("System Admin Tools")
-    
-    if st.button("🗑️ Hard Reset Database (ΠΡΟΣΟΧΗ)"):
-        os.remove(DB_FILE)
-        st.error("Η βάση διαγράφηκε. Κάνε refresh.")
+    st.title("⚙️ Ρυθμίσεις")
+    if st.button("🗑️ Hard Reset (Διαγραφή Βάσης)"):
+        if os.path.exists(DB_FILE): os.remove(DB_FILE)
+        st.error("Βάση διεγράφη. Κάνε Refresh.")
