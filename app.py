@@ -71,15 +71,20 @@ def load_data(file_path):
     except Exception as e:
         return None
 
-# --- Φόρτωση State ---
+# --- Φόρτωση State (ΔΙΟΡΘΩΜΕΝΟ) ---
 path = get_excel_path()
 if path:
+    # 1. Φόρτωση DataFrame αν δεν υπάρχει
     if 'df' not in st.session_state:
         st.session_state.df = load_data(path)
-        # Φτιάχνουμε μια λίστα τραπεζών από τα υπάρχοντα δεδομένα + default
-        existing_banks = st.session_state.df['Bank Account'].unique().tolist()
+
+    # 2. Φόρτωση Λίστας Τραπεζών (ΕΛΕΓΧΟΣ ΞΕΧΩΡΙΣΤΑ)
+    if 'bank_list' not in st.session_state:
+        # Παίρνουμε τις υπάρχουσες τράπεζες από το αρχείο
+        existing_banks = st.session_state.df['Bank Account'].unique().tolist() if st.session_state.df is not None else []
+        # Προσθέτουμε τις default
         default_banks = ['Alpha Bank', 'Eurobank', 'Piraeus', 'National Bank', 'Revolut', 'Ταμείο Μετρητών']
-        # Ενωση λιστών και καθαρισμός κενών
+        # Ενωση και καθαρισμός
         all_banks = list(set([x for x in existing_banks + default_banks if str(x) != 'nan' and str(x) != '']))
         st.session_state.bank_list = sorted(all_banks)
 else:
@@ -87,6 +92,9 @@ else:
     st.stop()
 
 df = st.session_state.df
+if df is None:
+    st.error("Το αρχείο Excel βρέθηκε αλλά δεν μπόρεσε να διαβαστεί. Ελέγξτε τη μορφή του.")
+    st.stop()
 
 # --- SIDEBAR MENU ---
 st.sidebar.title("🏢 SalesTree ERP")
@@ -151,7 +159,7 @@ if menu == "📊 Dashboard":
         st.subheader("🍰 Κέντρα Κόστους")
         exp = df_year[df_year['DocType'].isin(['Expense', 'Bill'])]
         if not exp.empty:
-            # ΔΙΟΡΘΩΣΗ: Αλλάξαμε το px.donut σε px.pie με hole=0.4
+            # ΔΙΟΡΘΩΣΗ: Χρήση px.pie αντί για px.donut που δεν υπάρχει
             fig2 = px.pie(exp, values='Amount (Net)', names='Category', hole=0.4)
             st.plotly_chart(fig2, use_container_width=True)
         else:
@@ -198,25 +206,30 @@ elif menu == "🏦 Treasury (Ταμεία & Τράπεζες)":
 
     with tab2:
         st.subheader("Κίνηση Λογαριασμών")
-        selected_bank = st.selectbox("Επίλεξε Λογαριασμό για προβολή", st.session_state.bank_list)
         
-        bank_txns = df_paid[df_paid['Bank Account'] == selected_bank].sort_values('DocDate')
-        
-        if not bank_txns.empty:
-            # Υπολογισμός Running Balance για το γράφημα
-            bank_txns['Balance'] = bank_txns.apply(
-                lambda x: x['Amount (Gross)'] if x['DocType'] == 'Income' else -x['Amount (Gross)'], axis=1
-            ).cumsum()
+        # ΕΛΕΓΧΟΣ ΑΣΦΑΛΕΙΑΣ
+        if 'bank_list' in st.session_state and st.session_state.bank_list:
+            selected_bank = st.selectbox("Επίλεξε Λογαριασμό για προβολή", st.session_state.bank_list)
             
-            # Γράφημα Γραμμής (Trend)
-            fig_line = px.line(bank_txns, x='DocDate', y='Balance', title=f'Εξέλιξη Υπολοίπου: {selected_bank}', markers=True)
-            fig_line.update_traces(line_color='#2980b9')
-            st.plotly_chart(fig_line, use_container_width=True)
+            bank_txns = df_paid[df_paid['Bank Account'] == selected_bank].sort_values('DocDate')
             
-            # Πίνακας Κινήσεων
-            st.dataframe(bank_txns[['DocDate', 'DocType', 'Counterparty', 'Description', 'Amount (Gross)']].sort_values('DocDate', ascending=False), use_container_width=True)
+            if not bank_txns.empty:
+                # Υπολογισμός Running Balance για το γράφημα
+                bank_txns['Balance'] = bank_txns.apply(
+                    lambda x: x['Amount (Gross)'] if x['DocType'] == 'Income' else -x['Amount (Gross)'], axis=1
+                ).cumsum()
+                
+                # Γράφημα Γραμμής (Trend)
+                fig_line = px.line(bank_txns, x='DocDate', y='Balance', title=f'Εξέλιξη Υπολοίπου: {selected_bank}', markers=True)
+                fig_line.update_traces(line_color='#2980b9')
+                st.plotly_chart(fig_line, use_container_width=True)
+                
+                # Πίνακας Κινήσεων
+                st.dataframe(bank_txns[['DocDate', 'DocType', 'Counterparty', 'Description', 'Amount (Gross)']].sort_values('DocDate', ascending=False), use_container_width=True)
+            else:
+                st.warning("Δεν βρέθηκαν συναλλαγές για αυτόν τον λογαριασμό.")
         else:
-            st.warning("Δεν βρέθηκαν συναλλαγές για αυτόν τον λογαριασμό.")
+            st.warning("Δεν βρέθηκαν λογαριασμοί τραπεζών. Πηγαίνετε στην καρτέλα 'Προσθήκη Τράπεζας'.")
 
     with tab3:
         st.subheader("Δημιουργία Νέου Λογαριασμού")
@@ -224,6 +237,9 @@ elif menu == "🏦 Treasury (Ταμεία & Τράπεζες)":
             new_bank_name = st.text_input("Όνομα Τράπεζας / Λογαριασμού (π.χ. 'PayPal', 'Eurobank Όψεως')")
             submitted = st.form_submit_button("Προσθήκη στη Λίστα")
             if submitted and new_bank_name:
+                if 'bank_list' not in st.session_state:
+                    st.session_state.bank_list = []
+                
                 if new_bank_name not in st.session_state.bank_list:
                     st.session_state.bank_list.append(new_bank_name)
                     st.success(f"Ο λογαριασμός '{new_bank_name}' προστέθηκε! Τώρα μπορείτε να τον επιλέξετε στις εγγραφές.")
@@ -261,6 +277,9 @@ elif menu == "📝 Journal (Εγγραφές)":
         df_display = df_display[df_display['DocType'].isin(type_filter)]
 
     # EDITABLE GRID
+    # Σιγουρεύουμε ότι η λίστα τραπεζών υπάρχει
+    banks_options = st.session_state.bank_list if 'bank_list' in st.session_state else []
+
     edited_df = st.data_editor(
         df_display.sort_values('DocDate', ascending=False),
         num_rows="dynamic",
@@ -271,7 +290,7 @@ elif menu == "📝 Journal (Εγγραφές)":
             "VAT Amount": st.column_config.NumberColumn("ΦΠΑ", format="€%.2f"),
             "DocType": st.column_config.SelectboxColumn("Τύπος", options=["Income", "Expense", "Bill", "Equity Distribution"]),
             "Payment Method": st.column_config.SelectboxColumn("Πληρωμή", options=["Cash", "Bank Transfer", "Card"]),
-            "Bank Account": st.column_config.SelectboxColumn("Λογαριασμός", options=st.session_state.bank_list), # ΕΔΩ ΧΡΗΣΙΜΟΠΟΙΟΥΜΕ ΤΗ ΛΙΣΤΑ
+            "Bank Account": st.column_config.SelectboxColumn("Λογαριασμός", options=banks_options),
             "Status": st.column_config.SelectboxColumn("Κατάσταση", options=["Paid", "Unpaid"]),
         },
         use_container_width=True,
@@ -337,7 +356,8 @@ elif menu == "⚙️ Ρυθμίσεις":
     
     with col1:
         st.write("🏦 **Ενεργοί Λογαριασμοί Τραπεζών**")
-        st.table(pd.DataFrame(st.session_state.bank_list, columns=["Όνομα Λογαριασμού"]))
+        banks_to_show = st.session_state.bank_list if 'bank_list' in st.session_state else []
+        st.table(pd.DataFrame(banks_to_show, columns=["Όνομα Λογαριασμού"]))
         
     with col2:
         st.write("📁 **Διαγνωστικά Συστήματος**")
