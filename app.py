@@ -17,7 +17,7 @@ st.markdown("""
         background-color: #ffffff; border-left: 5px solid #4CAF50;
         padding: 10px; border-radius: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
-    .stButton>button { width: 100%; border-radius: 5px; }
+    .stButton>button { width: 100%; border-radius: 5px; background-color: #2c3e50; color: white;}
     h1, h2, h3 { color: #2c3e50; font-family: 'Segoe UI', sans-serif; }
 </style>
 """, unsafe_allow_html=True)
@@ -61,42 +61,28 @@ def migrate_from_excel():
     # Ψάχνουμε το Excel
     excel_files = [f for f in os.listdir() if f.endswith('.xlsx') and not f.startswith('~$')]
     if not excel_files: 
-        st.warning("⚠️ Δεν βρέθηκε αρχείο .xlsx για μετάπτωση.")
         return
 
     file_to_load = excel_files[0]
-    st.toast(f"⏳ Προσπάθεια ανάγνωσης: {file_to_load}...", icon="🔄")
     
     try:
-        # Χρήση ExcelFile για να δούμε τα tabs πρώτα
         xl = pd.ExcelFile(file_to_load, engine='openpyxl')
         sheet_names = xl.sheet_names
         
-        # Λογική Επιλογής Tab
-        if "Journal" in sheet_names:
-            target_sheet = "Journal"
-        else:
-            target_sheet = sheet_names[0] # Παίρνουμε το πρώτο διαθέσιμο
-            st.warning(f"⚠️ Δεν βρέθηκε καρτέλα 'Journal'. Χρησιμοποιείται η καρτέλα: '{target_sheet}'")
-
+        target_sheet = "Journal" if "Journal" in sheet_names else sheet_names[0]
         df = pd.read_excel(file_to_load, sheet_name=target_sheet)
         
-        # Καθαρισμός Στηλών (αντιστοίχιση ονομάτων Excel -> DB)
-        # Φτιάχνουμε τα columns αν λείπουν
         expected_cols = ['DocNo', 'DocDate', 'DocType', 'Counterparty', 'Description', 'Category', 
                          'Amount (Net)', 'VAT Amount', 'Amount (Gross)', 'Payment Method', 'Bank Account', 'Status']
         
         for col in expected_cols:
             if col not in df.columns:
-                df[col] = "" # Γεμίζουμε με κενά αν λείπει στήλη
+                df[col] = "" 
 
         conn = get_connection()
         c = conn.cursor()
         
-        # Εισαγωγή στη Βάση
-        rows_inserted = 0
         for _, row in df.iterrows():
-            # Μετατροπή ημερομηνίας
             try:
                 d_date = pd.to_datetime(row['DocDate']).strftime('%Y-%m-%d')
             except:
@@ -106,24 +92,22 @@ def migrate_from_excel():
                 doc_no, doc_date, doc_type, counterparty, description, category,
                 amount_net, vat_amount, amount_gross, payment_method, bank_account, status
             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''', 
-            (str(row['DocNo']), d_date, str(row['DocType']), str(row['Counterparty']), 
-             str(row['Description']), str(row['Category']), 
-             float(pd.to_numeric(row['Amount (Net)'], errors='coerce') or 0), 
-             float(pd.to_numeric(row['VAT Amount'], errors='coerce') or 0), 
-             float(pd.to_numeric(row['Amount (Gross)'], errors='coerce') or 0),
-             str(row['Payment Method']), str(row['Bank Account']), str(row['Status'])))
-            
-            rows_inserted += 1
+            (str(row.get('DocNo', '')), d_date, str(row.get('DocType', '')), str(row.get('Counterparty', '')), 
+             str(row.get('Description', '')), str(row.get('Category', '')), 
+             float(pd.to_numeric(row.get('Amount (Net)'), errors='coerce') or 0), 
+             float(pd.to_numeric(row.get('VAT Amount'), errors='coerce') or 0), 
+             float(pd.to_numeric(row.get('Amount (Gross)'), errors='coerce') or 0),
+             str(row.get('Payment Method', '')), str(row.get('Bank Account', '')), str(row.get('Status', ''))))
             
             # Auto-Master Data
-            if row['Counterparty']:
+            if row.get('Counterparty'):
                 c.execute("INSERT OR IGNORE INTO counterparties (name, type) VALUES (?, ?)", (str(row['Counterparty']), 'Unknown'))
-            if row['Category']:
+            if row.get('Category'):
                 c.execute("INSERT OR IGNORE INTO categories (name, type) VALUES (?, ?)", (str(row['Category']), 'General'))
                 
         conn.commit()
         conn.close()
-        st.success(f"✅ Επιτυχία! Μεταφέρθηκαν {rows_inserted} εγγραφές στη βάση δεδομένων.")
+        st.toast("✅ Η μετάπτωση ολοκληρώθηκε!", icon="info")
         
     except Exception as e:
         st.error(f"❌ Η μετάπτωση απέτυχε. Λεπτομέρειες: {e}")
@@ -171,7 +155,7 @@ menu = sidebar_menu()
 
 # --- DASHBOARD ---
 if menu == "Dashboard":
-    st.title("📊 Financial Dashboard (SQL Powered)")
+    st.title("📊 Financial Dashboard")
     df = load_journal()
     
     if not df.empty:
@@ -194,12 +178,13 @@ if menu == "Dashboard":
             grp = df_curr.groupby(['month', 'doc_type'])['amount_net'].sum().reset_index()
             st.plotly_chart(px.bar(grp, x='month', y='amount_net', color='doc_type', barmode='group'), use_container_width=True)
     else:
-        st.info("Η βάση είναι κενή. Ξεκινήστε τις καταχωρήσεις ή ελέγξτε το Excel.")
+        st.info("Η βάση είναι κενή. Ξεκινήστε τις καταχωρήσεις.")
 
-# --- NEW TRANSACTION ---
+# --- NEW TRANSACTION (FIXED FORM) ---
 elif menu == "Νέα Συναλλαγή":
     st.title("➕ Νέα Εγγραφή")
     
+    # ΕΔΩ ΗΤΑΝ ΤΟ ΛΑΘΟΣ - ΔΙΟΡΘΩΘΗΚΕ Η ΔΟΜΗ ΤΗΣ ΦΟΡΜΑΣ
     with st.form("new_txn_form", clear_on_submit=True):
         c1, c2, c3 = st.columns(3)
         doc_date = c1.date_input("Ημερομηνία", value=date.today())
@@ -211,4 +196,63 @@ elif menu == "Νέα Συναλλαγή":
         cats = get_master_list("categories")
         
         counterparty = c4.selectbox("Συναλλασσόμενος", parties) if parties else c4.text_input("Συναλλασσόμενος (Νέος)")
-        category = c5.selectbox("Κατηγορία", cats) if cats else c5.text
+        category = c5.selectbox("Κατηγορία", cats) if cats else c5.text_input("Κατηγορία (Νέα)")
+        
+        description = st.text_input("Περιγραφή")
+        
+        st.divider()
+        c6, c7, c8 = st.columns(3)
+        net = c6.number_input("Καθαρό", step=0.01)
+        vat = c7.number_input("ΦΠΑ", step=0.01)
+        gross = c8.number_input("Μικτό", step=0.01)
+        
+        st.divider()
+        c9, c10, c11 = st.columns(3)
+        status = c9.selectbox("Κατάσταση", ["Paid", "Unpaid"])
+        pay_method = c10.selectbox("Τρόπος", ["Bank Transfer", "Card", "Cash"])
+        bank = c11.text_input("Τράπεζα", "Alpha Bank")
+        
+        # ΤΟ ΚΟΥΜΠΙ ΠΡΕΠΕΙ ΝΑ ΕΙΝΑΙ ΜΕΣΑ ΣΤΟ FORM (ΕΔΩ)
+        submitted = st.form_submit_button("💾 Αποθήκευση Εγγραφής")
+        
+        if submitted:
+            errs = []
+            if abs(gross - (net + vat)) > 0.05: errs.append("⚠️ Προσοχή: Net + VAT != Gross")
+            
+            if errs:
+                for e in errs: st.error(e)
+            else:
+                data = {
+                    "doc_no": doc_no, "doc_date": doc_date, "doc_type": doc_type,
+                    "counterparty": counterparty, "description": description, "category": category,
+                    "net": net, "vat": vat, "gross": gross,
+                    "pay_method": pay_method, "bank": bank, "status": status
+                }
+                add_transaction(data)
+                
+                # Update Master Data
+                conn = get_connection()
+                conn.execute("INSERT OR IGNORE INTO counterparties (name) VALUES (?)", (counterparty,))
+                conn.execute("INSERT OR IGNORE INTO categories (name) VALUES (?)", (category,))
+                conn.commit()
+                conn.close()
+                st.success("✅ Εγγραφή επιτυχής!")
+
+# --- JOURNAL ---
+elif menu == "Journal / Data":
+    st.title("📝 Journal")
+    df = load_journal()
+    search = st.text_input("🔍 Αναζήτηση")
+    if search and not df.empty:
+        mask = df.astype(str).apply(lambda x: x.str.contains(search, case=False)).any(axis=1)
+        df = df[mask]
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+# --- MASTER DATA ---
+elif menu == "Master Data":
+    st.title("🗂️ Master Data")
+    tab1, tab2 = st.tabs(["Counterparties", "Categories"])
+    conn = get_connection()
+    with tab1: st.dataframe(pd.read_sql("SELECT * FROM counterparties", conn), use_container_width=True)
+    with tab2: st.dataframe(pd.read_sql("SELECT * FROM categories", conn), use_container_width=True)
+    conn.close()
