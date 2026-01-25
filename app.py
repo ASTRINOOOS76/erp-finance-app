@@ -5,254 +5,243 @@ import plotly.express as px
 import os
 from datetime import datetime, date
 
-# --- 1. ΡΥΘΜΙΣΕΙΣ & DB CONFIG ---
-st.set_page_config(page_title="SalesTree Pro ERP", layout="wide", page_icon="🚀")
+# --- 1. ΡΥΘΜΙΣΕΙΣ ---
+st.set_page_config(page_title="SalesTree ERP", layout="wide", page_icon="🏢")
 DB_FILE = "erp.db"
 
-# --- CSS PRO THEME ---
+# --- CSS (Όπως σου άρεσε) ---
 st.markdown("""
 <style>
-    .stApp { background-color: #f8f9fa; }
+    .stApp { background-color: #f4f6f9; }
     div[data-testid="metric-container"] {
-        background-color: #ffffff; border-left: 5px solid #4CAF50;
-        padding: 10px; border-radius: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        background-color: #ffffff; border: 1px solid #ddd;
+        padding: 10px; border-radius: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }
-    .stButton>button { width: 100%; border-radius: 5px; background-color: #2c3e50; color: white;}
-    h1, h2, h3 { color: #2c3e50; font-family: 'Segoe UI', sans-serif; }
+    .stButton>button { width: 100%; border-radius: 5px; background-color: #007bff; color: white; }
+    .stButton>button:hover { background-color: #0056b3; color: white; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 2. DATABASE ENGINE (SQLITE) ---
+# --- 2. ΔΙΑΧΕΙΡΙΣΗ ΒΑΣΗΣ (DATABASE) ---
 def get_connection():
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
-    return conn
+    return sqlite3.connect(DB_FILE, check_same_thread=False)
 
-def init_db():
-    conn = get_connection()
-    c = conn.cursor()
-    
-    # Master Data
-    c.execute('''CREATE TABLE IF NOT EXISTS counterparties (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, type TEXT)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, type TEXT)''')
-
-    # Transactions
-    c.execute('''CREATE TABLE IF NOT EXISTS journal (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    doc_no TEXT, doc_date DATE, doc_type TEXT,
-                    counterparty TEXT, description TEXT, category TEXT,
-                    amount_net REAL, vat_amount REAL, amount_gross REAL,
-                    payment_method TEXT, bank_account TEXT, status TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )''')
-    conn.commit()
-    conn.close()
-
-# --- 3. MIGRATION (SMART VERSION) ---
-def migrate_from_excel():
+def init_and_migrate():
+    """Ελέγχει αν υπάρχει βάση. Αν όχι, διαβάζει το Excel και τη φτιάχνει."""
     if os.path.exists(DB_FILE):
-        conn = get_connection()
-        try:
-            count = conn.execute("SELECT count(*) FROM journal").fetchone()[0]
-            conn.close()
-            if count > 0: return # Έχουμε δεδομένα
-        except:
-            pass
+        return # Όλα καλά, η βάση υπάρχει
 
-    # Ψάχνουμε το Excel
+    # Αν δεν υπάρχει βάση, ψάχνουμε το Excel
     excel_files = [f for f in os.listdir() if f.endswith('.xlsx') and not f.startswith('~$')]
-    if not excel_files: 
+    
+    if not excel_files:
+        st.warning("⚠️ Δεν βρέθηκε βάση (erp.db) ούτε Excel για αρχική φόρτωση.")
         return
 
-    file_to_load = excel_files[0]
-    
+    # Διάβασμα Excel και αποθήκευση σε SQLite
     try:
-        xl = pd.ExcelFile(file_to_load, engine='openpyxl')
-        sheet_names = xl.sheet_names
+        file_path = excel_files[0]
+        st.toast(f"⏳ Μετατροπή του {file_path} σε Βάση Δεδομένων...", icon="🔄")
         
-        target_sheet = "Journal" if "Journal" in sheet_names else sheet_names[0]
-        df = pd.read_excel(file_to_load, sheet_name=target_sheet)
+        # Προσπάθεια εύρεσης του σωστού Tab
+        xl = pd.ExcelFile(file_path, engine='openpyxl')
+        sheet = "Journal" if "Journal" in xl.sheet_names else xl.sheet_names[0]
         
-        expected_cols = ['DocNo', 'DocDate', 'DocType', 'Counterparty', 'Description', 'Category', 
-                         'Amount (Net)', 'VAT Amount', 'Amount (Gross)', 'Payment Method', 'Bank Account', 'Status']
+        df = pd.read_excel(file_path, sheet_name=sheet)
         
-        for col in expected_cols:
-            if col not in df.columns:
-                df[col] = "" 
-
+        # Καθαρισμός ημερομηνιών για να είναι συμβατές με DB
+        df['DocDate'] = pd.to_datetime(df['DocDate'], errors='coerce').dt.strftime('%Y-%m-%d')
+        df['Payment Date'] = pd.to_datetime(df['Payment Date'], errors='coerce').dt.strftime('%Y-%m-%d')
+        
+        # Αποθήκευση
         conn = get_connection()
-        c = conn.cursor()
-        
-        for _, row in df.iterrows():
-            try:
-                d_date = pd.to_datetime(row['DocDate']).strftime('%Y-%m-%d')
-            except:
-                d_date = date.today().strftime('%Y-%m-%d')
-
-            c.execute('''INSERT INTO journal (
-                doc_no, doc_date, doc_type, counterparty, description, category,
-                amount_net, vat_amount, amount_gross, payment_method, bank_account, status
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''', 
-            (str(row.get('DocNo', '')), d_date, str(row.get('DocType', '')), str(row.get('Counterparty', '')), 
-             str(row.get('Description', '')), str(row.get('Category', '')), 
-             float(pd.to_numeric(row.get('Amount (Net)'), errors='coerce') or 0), 
-             float(pd.to_numeric(row.get('VAT Amount'), errors='coerce') or 0), 
-             float(pd.to_numeric(row.get('Amount (Gross)'), errors='coerce') or 0),
-             str(row.get('Payment Method', '')), str(row.get('Bank Account', '')), str(row.get('Status', ''))))
-            
-            # Auto-Master Data
-            if row.get('Counterparty'):
-                c.execute("INSERT OR IGNORE INTO counterparties (name, type) VALUES (?, ?)", (str(row['Counterparty']), 'Unknown'))
-            if row.get('Category'):
-                c.execute("INSERT OR IGNORE INTO categories (name, type) VALUES (?, ?)", (str(row['Category']), 'General'))
-                
-        conn.commit()
+        df.to_sql('journal', conn, if_exists='replace', index=False)
         conn.close()
-        st.toast("✅ Η μετάπτωση ολοκληρώθηκε!", icon="info")
+        st.success("✅ Η μετάπτωση ολοκληρώθηκε! Πλέον δουλεύουμε με Βάση Δεδομένων.")
+        st.rerun() # Επανεκκίνηση για να φορτώσει τα νέα δεδομένα
         
     except Exception as e:
-        st.error(f"❌ Η μετάπτωση απέτυχε. Λεπτομέρειες: {e}")
+        st.error(f"Σφάλμα κατά τη μετάπτωση: {e}")
 
-# Αρχικοποίηση
-init_db()
-migrate_from_excel()
+# Τρέχουμε τον έλεγχο κατά την εκκίνηση
+init_and_migrate()
 
-# --- 4. DATA ACCESS LAYER ---
-def load_journal():
-    conn = get_connection()
-    df = pd.read_sql("SELECT * FROM journal ORDER BY doc_date DESC", conn)
-    conn.close()
-    return df
-
-def add_transaction(data):
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute('''INSERT INTO journal (
-                doc_no, doc_date, doc_type, counterparty, description, category,
-                amount_net, vat_amount, amount_gross, payment_method, bank_account, status
-              ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''',
-              (data['doc_no'], data['doc_date'], data['doc_type'], data['counterparty'], 
-               data['description'], data['category'], data['net'], data['vat'], data['gross'],
-               data['pay_method'], data['bank'], data['status']))
-    conn.commit()
-    conn.close()
-
-def get_master_list(table):
+# --- 3. ΦΟΡΤΩΣΗ & ΑΠΟΘΗΚΕΥΣΗ ---
+def load_data():
     conn = get_connection()
     try:
-        res = [r[0] for r in conn.execute(f"SELECT name FROM {table} ORDER BY name").fetchall()]
+        df = pd.read_sql("SELECT * FROM journal", conn)
+        
+        # Μετατροπές τύπων για να παίζει σωστά το Grid
+        df['DocDate'] = pd.to_datetime(df['DocDate'], errors='coerce')
+        df['Payment Date'] = pd.to_datetime(df['Payment Date'], errors='coerce')
+        numeric_cols = ['Amount (Net)', 'Amount (Gross)', 'VAT Amount']
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+        
+        conn.close()
+        return df
     except:
-        res = []
-    conn.close()
-    return res
+        conn.close()
+        return pd.DataFrame() # Κενό αν γίνει λάθος
 
-# --- 5. UI COMPONENTS ---
-def sidebar_menu():
-    st.sidebar.title("🚀 SalesTree Pro")
-    return st.sidebar.radio("Module", ["Dashboard", "Νέα Συναλλαγή", "Journal / Data", "Master Data"])
+def save_data(df_to_save):
+    try:
+        conn = get_connection()
+        # Μετατροπή ημερομηνιών σε string πάλι για την SQLite
+        save_copy = df_to_save.copy()
+        save_copy['DocDate'] = save_copy['DocDate'].dt.strftime('%Y-%m-%d')
+        save_copy['Payment Date'] = save_copy['Payment Date'].dt.strftime('%Y-%m-%d')
+        
+        save_copy.to_sql('journal', conn, if_exists='replace', index=False)
+        conn.close()
+        st.toast("✅ Τα δεδομένα αποθηκεύτηκαν μόνιμα!", icon="💾")
+    except Exception as e:
+        st.error(f"Αδυναμία αποθήκευσης: {e}")
 
-# --- MAIN APP ---
-menu = sidebar_menu()
+# --- 4. UI ΕΦΑΡΜΟΓΗΣ ---
+st.sidebar.image("https://cdn-icons-png.flaticon.com/512/3135/3135715.png", width=50)
+st.sidebar.title("SalesTree ERP")
+
+# Φόρτωση Δεδομένων
+df = load_data()
+
+if df.empty:
+    st.info("Δεν υπάρχουν δεδομένα. Ανέβασε το Excel σου στο φάκελο για να ξεκινήσουμε.")
+    st.stop()
+
+# Global Filters
+years = sorted(df['DocDate'].dt.year.dropna().unique().astype(int), reverse=True)
+if not years: years = [2025] # Fallback
+selected_year = st.sidebar.selectbox("Έτος", years)
+
+df_year = df[df['DocDate'].dt.year == selected_year]
+
+# Menu
+menu = st.sidebar.radio("Μενού", ["📊 Dashboard", "📝 Εγγραφές & Επεξεργασία", "🏦 Treasury", "⏳ Οφειλές"])
 
 # --- DASHBOARD ---
-if menu == "Dashboard":
-    st.title("📊 Financial Dashboard")
-    df = load_journal()
+if menu == "📊 Dashboard":
+    st.title(f"📊 Εικόνα {selected_year}")
     
-    if not df.empty:
-        df['doc_date'] = pd.to_datetime(df['doc_date'])
-        current_year = datetime.now().year
-        df_curr = df[df['doc_date'].dt.year == current_year]
-        
-        inc = df_curr[df_curr['doc_type'] == 'Income']['amount_net'].sum()
-        exp = df_curr[df_curr['doc_type'].isin(['Expense', 'Bill'])]['amount_net'].sum()
-        
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Έσοδα Έτους", f"€{inc:,.2f}")
-        c2.metric("Έξοδα Έτους", f"€{exp:,.2f}")
-        c3.metric("Κέρδος (EBITDA)", f"€{inc - exp:,.2f}")
-        
-        st.divider()
-        c1, c2 = st.columns([2,1])
-        with c1:
-            df_curr['month'] = df_curr['doc_date'].dt.strftime('%Y-%m')
-            grp = df_curr.groupby(['month', 'doc_type'])['amount_net'].sum().reset_index()
-            st.plotly_chart(px.bar(grp, x='month', y='amount_net', color='doc_type', barmode='group'), use_container_width=True)
-    else:
-        st.info("Η βάση είναι κενή. Ξεκινήστε τις καταχωρήσεις.")
-
-# --- NEW TRANSACTION (FIXED FORM) ---
-elif menu == "Νέα Συναλλαγή":
-    st.title("➕ Νέα Εγγραφή")
+    inc = df_year[df_year['DocType'] == 'Income']['Amount (Net)'].sum()
+    exp = df_year[df_year['DocType'].isin(['Expense', 'Bill'])]['Amount (Net)'].sum()
+    profit = inc - exp
     
-    # ΕΔΩ ΗΤΑΝ ΤΟ ΛΑΘΟΣ - ΔΙΟΡΘΩΘΗΚΕ Η ΔΟΜΗ ΤΗΣ ΦΟΡΜΑΣ
-    with st.form("new_txn_form", clear_on_submit=True):
-        c1, c2, c3 = st.columns(3)
-        doc_date = c1.date_input("Ημερομηνία", value=date.today())
-        doc_no = c2.text_input("Αρ. Παραστατικού")
-        doc_type = c3.selectbox("Τύπος", ["Income", "Expense", "Bill", "Equity Distribution"])
-        
-        c4, c5 = st.columns(2)
-        parties = get_master_list("counterparties")
-        cats = get_master_list("categories")
-        
-        counterparty = c4.selectbox("Συναλλασσόμενος", parties) if parties else c4.text_input("Συναλλασσόμενος (Νέος)")
-        category = c5.selectbox("Κατηγορία", cats) if cats else c5.text_input("Κατηγορία (Νέα)")
-        
-        description = st.text_input("Περιγραφή")
-        
-        st.divider()
-        c6, c7, c8 = st.columns(3)
-        net = c6.number_input("Καθαρό", step=0.01)
-        vat = c7.number_input("ΦΠΑ", step=0.01)
-        gross = c8.number_input("Μικτό", step=0.01)
-        
-        st.divider()
-        c9, c10, c11 = st.columns(3)
-        status = c9.selectbox("Κατάσταση", ["Paid", "Unpaid"])
-        pay_method = c10.selectbox("Τρόπος", ["Bank Transfer", "Card", "Cash"])
-        bank = c11.text_input("Τράπεζα", "Alpha Bank")
-        
-        # ΤΟ ΚΟΥΜΠΙ ΠΡΕΠΕΙ ΝΑ ΕΙΝΑΙ ΜΕΣΑ ΣΤΟ FORM (ΕΔΩ)
-        submitted = st.form_submit_button("💾 Αποθήκευση Εγγραφής")
-        
-        if submitted:
-            errs = []
-            if abs(gross - (net + vat)) > 0.05: errs.append("⚠️ Προσοχή: Net + VAT != Gross")
-            
-            if errs:
-                for e in errs: st.error(e)
-            else:
-                data = {
-                    "doc_no": doc_no, "doc_date": doc_date, "doc_type": doc_type,
-                    "counterparty": counterparty, "description": description, "category": category,
-                    "net": net, "vat": vat, "gross": gross,
-                    "pay_method": pay_method, "bank": bank, "status": status
-                }
-                add_transaction(data)
-                
-                # Update Master Data
-                conn = get_connection()
-                conn.execute("INSERT OR IGNORE INTO counterparties (name) VALUES (?)", (counterparty,))
-                conn.execute("INSERT OR IGNORE INTO categories (name) VALUES (?)", (category,))
-                conn.commit()
-                conn.close()
-                st.success("✅ Εγγραφή επιτυχής!")
+    # Cashflow (Paid only)
+    paid_in = df_year[(df_year['Status']=='Paid') & (df_year['DocType']=='Income')]['Amount (Gross)'].sum()
+    paid_out = df_year[(df_year['Status']=='Paid') & (df_year['DocType']!='Income')]['Amount (Gross)'].sum()
+    
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Πωλήσεις", f"€{inc:,.0f}")
+    c2.metric("Έξοδα", f"€{exp:,.0f}")
+    c3.metric("Κέρδος", f"€{profit:,.0f}")
+    c4.metric("Ταμείο (Cash)", f"€{(paid_in-paid_out):,.0f}")
+    
+    st.divider()
+    
+    c1, c2 = st.columns([2,1])
+    with c1:
+        mon = df_year.copy()
+        mon['Month'] = mon['DocDate'].dt.strftime('%Y-%m')
+        grp = mon.groupby(['Month', 'DocType'])['Amount (Net)'].sum().reset_index()
+        st.plotly_chart(px.bar(grp, x='Month', y='Amount (Net)', color='DocType', barmode='group'), use_container_width=True)
+    with c2:
+        exp_df = df_year[df_year['DocType'].isin(['Expense', 'Bill'])]
+        if not exp_df.empty:
+            st.plotly_chart(px.pie(exp_df, values='Amount (Net)', names='Category', hole=0.4), use_container_width=True)
 
-# --- JOURNAL ---
-elif menu == "Journal / Data":
-    st.title("📝 Journal")
-    df = load_journal()
-    search = st.text_input("🔍 Αναζήτηση")
-    if search and not df.empty:
-        mask = df.astype(str).apply(lambda x: x.str.contains(search, case=False)).any(axis=1)
-        df = df[mask]
-    st.dataframe(df, use_container_width=True, hide_index=True)
+# --- ΕΓΓΡΑΦΕΣ (GRID EDITING - ΟΠΩΣ ΤΟ EXCEL) ---
+elif menu == "📝 Εγγραφές & Επεξεργασία":
+    st.title("📝 Διαχείριση Συναλλαγών")
+    st.caption("Επεξεργάσου τα δεδομένα στον πίνακα και πάτα 'Αποθήκευση' στο τέλος.")
+    
+    # Φίλτρα
+    c1, c2 = st.columns(2)
+    search = c1.text_input("🔍 Αναζήτηση")
+    type_filter = c2.multiselect("Φίλτρο Τύπου", df['DocType'].unique())
+    
+    df_view = df_year.copy()
+    if search:
+        df_view = df_view[df_view.astype(str).apply(lambda x: x.str.contains(search, case=False)).any(axis=1)]
+    if type_filter:
+        df_view = df_view[df_view['DocType'].isin(type_filter)]
 
-# --- MASTER DATA ---
-elif menu == "Master Data":
-    st.title("🗂️ Master Data")
-    tab1, tab2 = st.tabs(["Counterparties", "Categories"])
-    conn = get_connection()
-    with tab1: st.dataframe(pd.read_sql("SELECT * FROM counterparties", conn), use_container_width=True)
-    with tab2: st.dataframe(pd.read_sql("SELECT * FROM categories", conn), use_container_width=True)
-    conn.close()
+    # Λίστα Τραπεζών για Dropdown (δυναμική)
+    existing_banks = list(df['Bank Account'].unique())
+    default_banks = ['Alpha Bank', 'Eurobank', 'Piraeus', 'National Bank', 'Revolut', 'Ταμείο Μετρητών']
+    bank_options = sorted(list(set([x for x in existing_banks + default_banks if str(x) != 'nan'])))
+
+    # DATA EDITOR (Το βασικό εργαλείο)
+    edited_df = st.data_editor(
+        df_view.sort_values('DocDate', ascending=False),
+        num_rows="dynamic", # Επιτρέπει προσθήκη γραμμών
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "DocDate": st.column_config.DateColumn("Ημ/νία"),
+            "Payment Date": st.column_config.DateColumn("Ημ. Πληρωμής"),
+            "Amount (Net)": st.column_config.NumberColumn("Καθαρό", format="€%.2f"),
+            "Amount (Gross)": st.column_config.NumberColumn("Μικτό", format="€%.2f"),
+            "DocType": st.column_config.SelectboxColumn("Τύπος", options=["Income", "Expense", "Bill", "Equity Distribution"]),
+            "Status": st.column_config.SelectboxColumn("Κατάσταση", options=["Paid", "Unpaid"]),
+            "Payment Method": st.column_config.SelectboxColumn("Πληρωμή", options=["Bank Transfer", "Cash", "Card"]),
+            "Bank Account": st.column_config.SelectboxColumn("Λογαριασμός", options=bank_options),
+        }
+    )
+    
+    st.markdown("---")
+    # ΤΟ ΚΟΥΜΠΙ ΠΟΥ ΣΩΖΕΙ ΤΑ ΠΑΝΤΑ
+    if st.button("💾 Αποθήκευση Αλλαγών στη Βάση", type="primary"):
+        # Πρέπει να ενώσουμε τις αλλαγές του edited_df με το γενικό df
+        # Για απλότητα στο MVP, υποθέτουμε ότι δουλεύεις στο τρέχον έτος.
+        # Η πιο ασφαλής μέθοδος εδώ: Ξαναφορτώνουμε όλη τη βάση, σβήνουμε τις παλιές εγγραφές του έτους και βάζουμε τις νέες.
+        # ΑΛΛΑ για να μην μπερδευτείς: Θα σώσουμε ΑΥΤΟ που βλέπεις (edited_df) + τα υπόλοιπα έτη από το original df.
+        
+        other_years_df = df[df['DocDate'].dt.year != selected_year]
+        final_df_to_save = pd.concat([other_years_df, edited_df], ignore_index=True)
+        
+        save_data(final_df_to_save)
+        st.balloons()
+
+# --- TREASURY ---
+elif menu == "🏦 Treasury":
+    st.title("🏦 Ταμεία & Τράπεζες")
+    
+    # Υπολογισμός υπολοίπων (Διαχρονικά)
+    df_paid = df[df['Status'] == 'Paid'].copy()
+    df_paid['Flow'] = df_paid.apply(lambda x: x['Amount (Gross)'] if x['DocType'] == 'Income' else -x['Amount (Gross)'], axis=1)
+    
+    balances = df_paid.groupby('Bank Account')['Flow'].sum().reset_index()
+    
+    st.metric("Συνολική Ρευστότητα", f"€{balances['Flow'].sum():,.2f}")
+    
+    cols = st.columns(3)
+    for i, row in balances.iterrows():
+        with cols[i % 3]:
+            st.info(f"**{row['Bank Account']}**\n\n#### €{row['Flow']:,.2f}")
+    
+    st.subheader("Αναλυτική Κίνηση")
+    sel_bank = st.selectbox("Επιλογή Λογαριασμού", balances['Bank Account'].unique())
+    mask = (df_paid['Bank Account'] == sel_bank) & (df_paid['DocDate'].dt.year == selected_year)
+    st.dataframe(df_paid[mask][['DocDate', 'Description', 'Flow']].sort_values('DocDate', ascending=False), use_container_width=True)
+
+# --- AGING ---
+elif menu == "⏳ Οφειλές":
+    st.title("⏳ Ποιοι χρωστάνε / Ποιους χρωστάμε")
+    
+    c1, c2 = st.columns(2)
+    
+    unpaid_in = df[(df['DocType'] == 'Income') & (df['Status'] == 'Unpaid')]
+    unpaid_out = df[(df['DocType'].isin(['Expense', 'Bill'])) & (df['Status'] == 'Unpaid')]
+    
+    with c1:
+        st.subheader("Απαιτήσεις (Πελάτες)")
+        st.metric("Σύνολο", f"€{unpaid_in['Amount (Gross)'].sum():,.2f}")
+        st.dataframe(unpaid_in[['DocDate', 'Counterparty', 'Amount (Gross)']], use_container_width=True)
+        
+    with c2:
+        st.subheader("Υποχρεώσεις (Προμηθευτές)")
+        st.metric("Σύνολο", f"€{unpaid_out['Amount (Gross)'].sum():,.2f}")
+        st.dataframe(unpaid_out[['DocDate', 'Counterparty', 'Amount (Gross)']], use_container_width=True)
