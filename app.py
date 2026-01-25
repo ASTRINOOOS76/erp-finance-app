@@ -2,8 +2,6 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 import plotly.express as px
-import plotly.graph_objects as go
-import io
 import os
 from datetime import datetime, date
 
@@ -24,7 +22,6 @@ st.markdown("""
     }
     .stTabs [aria-selected="true"] { background-color: #4CAF50; color: white; }
     .stButton>button { width: 100%; border-radius: 5px; background-color: #2c3e50; color: white; }
-    .stButton>button:hover { background-color: #1a252f; color: white; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -33,20 +30,17 @@ def get_connection():
     return sqlite3.connect(DB_FILE, check_same_thread=False)
 
 def init_db_and_migrate():
-    """Ελέγχει αν υπάρχει βάση. Αν όχι, ζητάει Excel."""
     if os.path.exists(DB_FILE):
-        return True # Η βάση υπάρχει
+        return True 
 
-    # Αν δεν υπάρχει βάση, ψάχνουμε τοπικά για Excel
     excel_files = [f for f in os.listdir() if f.endswith('.xlsx') and not f.startswith('~$')]
     file_to_load = None
 
     if excel_files:
         file_to_load = excel_files[0]
     else:
-        # Αν δεν υπάρχει αρχείο, ζητάμε upload
         st.warning("⚠️ Δεν βρέθηκε Βάση Δεδομένων.")
-        st.info("📂 Παρακαλώ ανεβάστε το Excel (Journal) για την αρχική εγκατάσταση.")
+        st.info("📂 Παρακαλώ ανεβάστε το Excel (Journal).")
         uploaded = st.file_uploader("Upload Excel", type=['xlsx'])
         if uploaded:
             with open("temp_init.xlsx", "wb") as f:
@@ -57,13 +51,39 @@ def init_db_and_migrate():
 
     if file_to_load:
         try:
-            with st.spinner("Γίνεται δημιουργία της βάσης..."):
+            with st.spinner("Γίνεται ανάλυση αρχείου..."):
                 xl = pd.ExcelFile(file_to_load, engine='openpyxl')
                 sheet = "Journal" if "Journal" in xl.sheet_names else xl.sheet_names[0]
                 df = pd.read_excel(file_to_load, sheet_name=sheet)
                 
+                # --- ΕΞΥΠΝΟΣ ΚΑΘΑΡΙΣΜΟΣ ΣΤΗΛΩΝ (ΤΟ FIX ΣΟΥ) ---
+                # 1. Αφαιρούμε κενά από τα ονόματα (π.χ. " DocDate " -> "DocDate")
+                df.columns = df.columns.str.strip()
+                
+                # 2. Χάρτης μετονομασίας (Αν έχεις άλλα ονόματα στο Excel)
+                rename_map = {
+                    'Date': 'DocDate',
+                    'Ημερομηνία': 'DocDate',
+                    'Document Date': 'DocDate',
+                    'PaymentDate': 'Payment Date',
+                    'Ημ. Πληρωμής': 'Payment Date',
+                    'Net': 'Amount (Net)',
+                    'Gross': 'Amount (Gross)',
+                    'Type': 'DocType'
+                }
+                df.rename(columns=rename_map, inplace=True)
+                
+                # 3. Έλεγχος αν υπάρχει πλέον η στήλη
+                if 'DocDate' not in df.columns:
+                    st.error(f"❌ Σφάλμα: Δεν βρέθηκε η στήλη 'DocDate' (ή 'Date').")
+                    st.write("Οι στήλες που βλέπω στο Excel σου είναι:")
+                    st.write(list(df.columns))
+                    st.stop()
+
                 # Καθαρισμός ημερομηνιών για SQLite
                 df['DocDate'] = pd.to_datetime(df['DocDate'], errors='coerce').dt.strftime('%Y-%m-%d')
+                if 'Payment Date' in df.columns:
+                    df['Payment Date'] = pd.to_datetime(df['Payment Date'], errors='coerce').dt.strftime('%Y-%m-%d')
                 
                 conn = get_connection()
                 df.to_sql('journal', conn, if_exists='replace', index=False)
@@ -82,17 +102,20 @@ def load_data_from_db():
     conn = get_connection()
     try:
         df = pd.read_sql("SELECT * FROM journal", conn)
+        
+        # Έλεγχος και δημιουργία κενών στηλών αν λείπουν
+        required_cols = ['DocDate', 'Payment Date', 'Amount (Net)', 'Amount (Gross)', 'VAT Amount', 
+                         'DocType', 'Payment Method', 'Bank Account', 'Status', 'Description', 'Category', 'GL Account']
+        
+        for col in required_cols:
+            if col not in df.columns:
+                df[col] = 0 if 'Amount' in col or 'GL' in col else ""
+
         df['DocDate'] = pd.to_datetime(df['DocDate'], errors='coerce')
+        df['Payment Date'] = pd.to_datetime(df['Payment Date'], errors='coerce')
         
-        # Καθαρισμός Αριθμών
         for col in ['Amount (Net)', 'Amount (Gross)', 'VAT Amount', 'GL Account']:
-            if col in df.columns: 
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-        
-        # Καθαρισμός Κειμένων
-        cols_needed = ['DocType', 'Payment Method', 'Bank Account', 'Status', 'Description', 'Category']
-        for c in cols_needed:
-            if c not in df.columns: df[c] = ""
+             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
         
         df.loc[df['Payment Method'] == 'Cash', 'Bank Account'] = 'Ταμείο Μετρητών'
         conn.close()
@@ -105,12 +128,15 @@ def save_data_to_db(df_to_save):
     try:
         conn = get_connection()
         save_copy = df_to_save.copy()
-        save_copy['DocDate'] = save_copy['DocDate'].dt.strftime('%Y-%m-%d')
+        if 'DocDate' in save_copy.columns:
+            save_copy['DocDate'] = save_copy['DocDate'].dt.strftime('%Y-%m-%d')
+        if 'Payment Date' in save_copy.columns:
+            save_copy['Payment Date'] = save_copy['Payment Date'].dt.strftime('%Y-%m-%d')
         save_copy.to_sql('journal', conn, if_exists='replace', index=False)
         conn.close()
-        st.toast("✅ Τα δεδομένα αποθηκεύτηκαν μόνιμα!", icon="💾")
+        st.toast("✅ Αποθηκεύτηκε!", icon="💾")
     except Exception as e:
-        st.error(f"Αδυναμία αποθήκευσης: {e}")
+        st.error(f"Error: {e}")
 
 # --- 4. LOGIN ---
 def check_login():
@@ -138,16 +164,23 @@ check_login()
 if not init_db_and_migrate():
     st.stop()
 
-# Φόρτωση δεδομένων στη μνήμη (Session State)
 if 'df' not in st.session_state:
     st.session_state.df = load_data_from_db()
 
-# Ανανέωση λίστας τραπεζών
-existing = st.session_state.df['Bank Account'].unique().tolist() if not st.session_state.df.empty else []
+# Αν η βάση είναι άδεια ή χαλασμένη
+if st.session_state.df.empty:
+    st.warning("⚠️ Η βάση είναι κενή ή δεν διαβάστηκε σωστά.")
+    if st.button("🗑️ Διαγραφή Βάσης & Επανεκκίνηση"):
+        if os.path.exists(DB_FILE): os.remove(DB_FILE)
+        st.rerun()
+    st.stop()
+
+# Τράπεζες
+existing = st.session_state.df['Bank Account'].unique().tolist()
 default = ['Alpha Bank', 'Eurobank', 'Piraeus', 'National Bank', 'Revolut', 'Ταμείο Μετρητών']
 st.session_state.bank_list = sorted(list(set([x for x in existing + default if str(x) != 'nan' and str(x) != ''])))
 
-df = st.session_state.df # Alias για ευκολία
+df = st.session_state.df 
 
 # --- 5. SIDEBAR ---
 st.sidebar.title("🏢 SalesTree ERP")
@@ -202,7 +235,6 @@ elif menu == "🏦 Treasury":
     tab1, tab2, tab3 = st.tabs(["💰 Υπόλοιπα", "📈 Κίνηση", "➕ Νέα Τράπεζα"])
     
     with tab1:
-        # Υπολογισμός σε ΟΛΟ το ιστορικό για σωστά υπόλοιπα
         df_pd = df[df['Status'] == 'Paid'].copy()
         df_pd['Sgn'] = df_pd.apply(lambda x: x['Amount (Gross)'] if x['DocType'] == 'Income' else -x['Amount (Gross)'], axis=1)
         bal = df_pd.groupby('Bank Account')['Sgn'].sum().reset_index()
@@ -213,7 +245,6 @@ elif menu == "🏦 Treasury":
 
     with tab2:
         sel_bank = st.selectbox("Λογαριασμός", st.session_state.bank_list)
-        # Εδώ δείχνουμε κινήσεις βάσει του φίλτρου ημερομηνίας
         txns = df_filtered[(df_filtered['Bank Account'] == sel_bank) & (df_filtered['Status']=='Paid')].sort_values('DocDate', ascending=False)
         st.dataframe(txns[['DocDate', 'Description', 'Amount (Gross)', 'DocType']], use_container_width=True)
 
@@ -221,19 +252,16 @@ elif menu == "🏦 Treasury":
         with st.form("new_bank"):
             nb = st.text_input("Όνομα Τράπεζας")
             if st.form_submit_button("Προσθήκη"):
-                st.session_state.bank_list.append(nb)
-                st.success("ΟΚ - Η τράπεζα θα εμφανιστεί στις επιλογές.")
+                st.session_state.bank_list.append(nb); st.success("ΟΚ")
 
-# --- 8. JOURNAL (DATABASE ENABLED) ---
+# --- 8. JOURNAL ---
 elif menu == "📝 Journal":
     st.title("📝 Ημερολόγιο")
     
-    # Download Button (Optional Backup)
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine='xlsxwriter') as writer: st.session_state.df.to_excel(writer, sheet_name='Journal', index=False)
     st.download_button("💾 Download Excel Backup", buf, "Finance_Backup.xlsx")
 
-    # Filters
     c1, c2 = st.columns(2)
     s_txt = c1.text_input("Αναζήτηση")
     t_flt = c2.multiselect("Τύπος", df['DocType'].unique())
@@ -242,7 +270,6 @@ elif menu == "📝 Journal":
     if s_txt: v = v[v.astype(str).apply(lambda x: x.str.contains(s_txt, case=False)).any(axis=1)]
     if t_flt: v = v[v['DocType'].isin(t_flt)]
 
-    # Editor
     edf = st.data_editor(v.sort_values('DocDate', ascending=False), num_rows="dynamic", use_container_width=True, hide_index=True,
         column_config={
             "DocDate": st.column_config.DateColumn("Ημ/νία"),
@@ -255,32 +282,11 @@ elif menu == "📝 Journal":
     )
     
     st.markdown("---")
-    # ΤΟ ΣΗΜΑΝΤΙΚΟ ΚΟΥΜΠΙ
     if st.button("💾 Αποθήκευση στη Βάση", type="primary"):
-        # Ενημέρωση του κεντρικού DF στη μνήμη
         st.session_state.df.update(edf)
-        # Προσθήκη νέων γραμμών αν υπάρχουν (αυτό θέλει προσοχή με τα indexes, εδώ κάνουμε απλή ενημέρωση)
-        # Για να είμαστε σίγουροι, σώζουμε το edf πάνω στις αντίστοιχες εγγραφές
-        
-        # Στρατηγική Αποθήκευσης: 
-        # Επειδή το edf είναι φιλτραρισμένο, δεν μπορούμε να αντικαταστήσουμε ΟΛΗ τη βάση μόνο με αυτό.
-        # Θα ενώσουμε τα δεδομένα που ΔΕΝ βλέπουμε, με αυτά που βλέπουμε (edf).
-        
-        # 1. Βρίσκουμε τα δεδομένα που είναι ΕΚΤΟΣ φίλτρων (αυτά δεν τα πείραξε ο χρήστης)
-        # Χρησιμοποιούμε το index για να τα ξεχωρίσουμε αν είναι δυνατόν, ή απλά ενώνουμε.
-        # Εδώ, για ασφάλεια και απλότητα, θα ενημερώσουμε το st.session_state.df και θα σώσουμε ΟΛΟ το df.
-        
-        # Update session state logic:
-        # Αντικαθιστούμε τις γραμμές στο main df που αντιστοιχούν στο edf
-        # (Σημείωση: Το data_editor κρατάει το original index αν δεν κάνουμε reset_index)
-        st.session_state.df.update(edf)
-        
-        # Αν προστέθηκαν ΝΕΕΣ γραμμές στο edf, πρέπει να τις προσθέσουμε στο main df
         new_rows = edf[~edf.index.isin(st.session_state.df.index)]
         if not new_rows.empty:
             st.session_state.df = pd.concat([st.session_state.df, new_rows], ignore_index=True)
-
-        # Τώρα σώζουμε ΟΛΟ το session state df στη βάση
         save_data_to_db(st.session_state.df)
         st.balloons()
 
@@ -296,20 +302,7 @@ elif menu == "⏳ Aging":
 # --- 10. SETTINGS ---
 elif menu == "⚙️ Ρυθμίσεις":
     st.title("⚙️ Ρυθμίσεις")
-    
-    tab_info, tab_gl = st.tabs(["ℹ️ Σύστημα", "📚 Λογιστικό Σχέδιο"])
-    
-    with tab_info:
-        st.info(f"Χρήστης: {st.session_state.username}")
-        st.write("Τράπεζες:", st.session_state.bank_list)
-        if st.button("🗑️ Hard Reset (Διαγραφή Βάσης)"):
-            if os.path.exists(DB_FILE): os.remove(DB_FILE)
-            st.rerun()
-
-    with tab_gl:
-        gl_data = {
-            "Κωδικός": [4000, 5000, 6000, 7000, 7010, 8000, 9999],
-            "Περιγραφή": ["Έσοδα", "Κόστη", "Έξοδα", "Τράπεζα", "Ταμείο", "Μερίσματα", "Unmapped"],
-            "Τύπος": ["Έσοδο", "Έξοδο", "Έξοδο", "Asset", "Asset", "Equity", "-"]
-        }
-        st.table(pd.DataFrame(gl_data))
+    st.write(f"Χρήστης: {st.session_state.username}")
+    if st.button("🗑️ Hard Reset (Διαγραφή Βάσης)"):
+        if os.path.exists(DB_FILE): os.remove(DB_FILE)
+        st.rerun()
