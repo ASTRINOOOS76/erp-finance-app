@@ -7,79 +7,36 @@ import io
 import os
 from datetime import datetime, date
 
-# --- 1. ΡΥΘΜΙΣΕΙΣ & ΜΟΝΤΕΡΝΟ DESIGN ---
+# --- 1. ΡΥΘΜΙΣΕΙΣ ΣΕΛΙΔΑΣ ---
 st.set_page_config(page_title="SalesTree ERP", layout="wide", page_icon="🏢")
 DB_FILE = "erp.db"
 
-# Εδώ είναι το "Professional Theme"
+# --- CSS (ΚΑΘΑΡΟ & ΕΥΑΝΑΓΝΩΣΤΟ) ---
 st.markdown("""
 <style>
-    /* 1. ΦΟΝΤΟ ΕΦΑΡΜΟΓΗΣ - Απαλό Γκρι */
-    .stApp {
-        background-color: #f1f5f9;
-    }
-
-    /* 2. SIDEBAR - Σκούρο Μπλε για Αντίθεση */
-    section[data-testid="stSidebar"] {
-        background-color: #0f172a;
-    }
-    /* Τα γράμματα στο Sidebar ΛΕΥΚΑ για να φαίνονται */
-    section[data-testid="stSidebar"] h1, 
-    section[data-testid="stSidebar"] h2, 
-    section[data-testid="stSidebar"] h3, 
-    section[data-testid="stSidebar"] label, 
-    section[data-testid="stSidebar"] span, 
-    section[data-testid="stSidebar"] p, 
-    section[data-testid="stSidebar"] div {
-        color: #f8fafc !important;
-    }
-
-    /* 3. ΚΥΡΙΩΣ ΚΕΙΜΕΝΟ - Σκούρο για να διαβάζεται */
-    h1, h2, h3, h4, p, li, div {
-        color: #1e293b; 
-    }
-
-    /* 4. METRICS (Κουτάκια) - Λευκά με σκιά */
+    .stApp { background-color: #ffffff; }
+    [data-testid="stSidebar"] { background-color: #f8f9fa; border-right: 1px solid #ddd; }
+    h1, h2, h3, p, label, div, span { color: #000000 !important; font-family: sans-serif; }
+    .stRadio label { color: #000000 !important; font-weight: 600 !important; font-size: 16px !important; }
+    
+    /* Metrics Styles */
     div[data-testid="metric-container"] {
-        background-color: #ffffff;
-        padding: 15px;
-        border-radius: 10px;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
-        border-left: 5px solid #3b82f6; /* Μπλε γραμμή αριστερά */
+        background-color: #f0f2f6; border: 1px solid #d1d5db;
+        padding: 15px; border-radius: 8px; box-shadow: 2px 2px 5px rgba(0,0,0,0.1);
     }
-    div[data-testid="metric-container"] label {
-        color: #64748b !important; /* Γκρι τίτλος metric */
-    }
-    div[data-testid="metric-container"] div {
-        color: #0f172a !important; /* Μαύρο νούμερο */
-    }
-
-    /* 5. TABS - Καθαρό στυλ */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 5px;
-    }
-    .stTabs [data-baseweb="tab"] {
-        background-color: #e2e8f0;
-        border-radius: 5px;
-        color: #334155;
-        font-weight: 600;
-    }
-    .stTabs [aria-selected="true"] {
-        background-color: #3b82f6 !important;
-        color: white !important;
-    }
-
-    /* 6. BUTTONS */
+    
     .stButton>button {
-        background-color: #3b82f6;
-        color: white;
-        border-radius: 6px;
-        border: none;
-        padding: 0.5rem 1rem;
+        background-color: #2c3e50 !important; color: white !important;
+        font-weight: bold; border-radius: 5px; border: none;
     }
-    .stButton>button:hover {
-        background-color: #2563eb;
+    .stButton>button:hover { background-color: #1a252f !important; }
+    
+    .stTabs [data-baseweb="tab-list"] { gap: 5px; }
+    .stTabs [data-baseweb="tab"] {
+        background-color: #e2e8f0; color: #000000 !important;
+        border-radius: 4px; font-weight: bold;
     }
+    .stTabs [aria-selected="true"] { background-color: #2563eb !important; color: white !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -234,7 +191,7 @@ df = st.session_state.df
 
 # --- 5. SIDEBAR ---
 st.sidebar.title("🏢 SalesTree ERP")
-st.sidebar.markdown(f"<p style='color:white;'>👤 <b>{st.session_state.username}</b></p>", unsafe_allow_html=True)
+st.sidebar.markdown(f"<p style='color:black;'>👤 <b>{st.session_state.username}</b></p>", unsafe_allow_html=True)
 if st.sidebar.button("Logout"): 
     st.session_state.logged_in = False
     st.rerun()
@@ -248,6 +205,7 @@ if len(dates) == 2:
 else:
     df_filtered = df
 
+# MENU
 menu = st.sidebar.radio("Μενού", 
     ["📊 Dashboard", "👥 Μέτοχοι", "⚖️ Ισοζύγιο", "🖨️ Αναφορές", "🏦 Treasury", "📝 Journal", "⏳ Aging", "⚙️ Ρυθμίσεις"]
 )
@@ -267,16 +225,17 @@ if menu == "📊 Dashboard":
     
     st.divider()
     
+    st.subheader("🏆 Smart Analytics")
     c1, c2 = st.columns(2)
     with c1:
-        st.markdown("### Top 5 Πελάτες (Τζίρος)")
+        st.markdown("**Top 5 Πελάτες (Τζίρος)**")
         top_clients = df_filtered[df_filtered['DocType']=='Income'].groupby('Counterparty')['Amount (Net)'].sum().nlargest(5).reset_index()
         if not top_clients.empty:
             st.plotly_chart(px.bar(top_clients, x='Amount (Net)', y='Counterparty', orientation='h', color='Amount (Net)'), use_container_width=True)
         else:
             st.info("Δεν υπάρχουν πωλήσεις.")
     with c2:
-        st.markdown("### Top 5 Κατηγορίες Εξόδων")
+        st.markdown("**Top 5 Κατηγορίες Εξόδων**")
         top_exp = df_filtered[df_filtered['DocType'].isin(['Expense', 'Bill'])].groupby('Category')['Amount (Net)'].sum().nlargest(5).reset_index()
         if not top_exp.empty:
              st.plotly_chart(px.pie(top_exp, values='Amount (Net)', names='Category', hole=0.5), use_container_width=True)
@@ -367,17 +326,54 @@ elif menu == "🖨️ Αναφορές":
         pl = df_filtered[df_filtered['DocType'].isin(['Income','Expense','Bill'])].groupby(['Category','DocType'])['Amount (Net)'].sum().unstack().fillna(0)
         st.dataframe(pl, use_container_width=True)
 
-# --- 10. TREASURY ---
+# --- 10. TREASURY (ΔΙΟΡΘΩΜΕΝΟ) ---
 elif menu == "🏦 Treasury":
-    st.title("🏦 Ρευστότητα")
+    st.title("🏦 Διαχείριση Ρευστότητας")
+    
+    # 1. Φιλτράρισμα & Υπολογισμός
     df_pd = df[df['Status'] == 'Paid'].copy()
     df_pd['Sgn'] = df_pd.apply(lambda x: x['Amount (Gross)'] if x['DocType'] == 'Income' else -x['Amount (Gross)'], axis=1)
-    bal = df_pd.groupby('Bank Account')['Sgn'].sum().reset_index()
     
-    st.metric("Σύνολο", f"€{bal['Sgn'].sum():,.2f}")
-    cols = st.columns(3)
-    for i, r in bal.iterrows():
-        with cols[i%3]: st.info(f"**{r['Bank Account']}**\n\n### €{r['Sgn']:,.2f}")
+    # 2. Διαχωρισμός: Ταμείο vs Τράπεζες
+    df_cash = df_pd[df_pd['Bank Account'].str.contains("Ταμείο|Cash", case=False, na=False)]
+    df_bank = df_pd[~df_pd['Bank Account'].str.contains("Ταμείο|Cash", case=False, na=False)]
+    
+    # 3. Εμφάνιση
+    tab1, tab2, tab3 = st.tabs(["💰 Υπόλοιπα (Ξεχωριστά)", "📈 Κίνηση", "➕ Νέα Τράπεζα"])
+    
+    with tab1:
+        st.metric("ΣΥΝΟΛΙΚΗ ΡΕΥΣΤΟΤΗΤΑ", f"€{df_pd['Sgn'].sum():,.2f}")
+        st.divider()
+
+        # Α. ΤΑΜΕΙΟ (ΜΕΤΡΗΤΑ)
+        st.subheader("💵 Ταμείο (Μετρητά)")
+        if not df_cash.empty:
+            cash_bal = df_cash['Sgn'].sum()
+            st.info(f"**Ταμείο Μετρητών**: €{cash_bal:,.2f}")
+        else:
+            st.info("Δεν βρέθηκαν κινήσεις μετρητών.")
+
+        # Β. ΤΡΑΠΕΖΕΣ
+        st.subheader("🏦 Τραπεζικοί Λογαριασμοί")
+        if not df_bank.empty:
+            bank_balances = df_bank.groupby('Bank Account')['Sgn'].sum().reset_index()
+            cols = st.columns(3)
+            for i, r in bank_balances.iterrows():
+                with cols[i % 3]: 
+                    st.success(f"**{r['Bank Account']}**\n\n### €{r['Sgn']:,.2f}")
+        else:
+            st.info("Δεν βρέθηκαν κινήσεις τραπεζών.")
+
+    with tab2:
+        sel_bank = st.selectbox("Λογαριασμός", st.session_state.bank_list)
+        txns = df_filtered[(df_filtered['Bank Account'] == sel_bank) & (df_filtered['Status']=='Paid')].sort_values('DocDate', ascending=False)
+        st.dataframe(txns[['DocDate', 'Description', 'Amount (Gross)', 'DocType']], use_container_width=True)
+
+    with tab3:
+        with st.form("new_bank"):
+            nb = st.text_input("Όνομα Τράπεζας")
+            if st.form_submit_button("Προσθήκη"):
+                st.session_state.bank_list.append(nb); st.success("ΟΚ")
 
 # --- 11. JOURNAL ---
 elif menu == "📝 Journal":
@@ -395,6 +391,8 @@ elif menu == "📝 Journal":
     if s_txt: v = v[v.astype(str).apply(lambda x: x.str.contains(s_txt, case=False)).any(axis=1)]
     if t_flt: v = v[v['DocType'].isin(t_flt)]
 
+    gl_options = sorted(list(GL_MAP.keys()))
+
     edf = st.data_editor(v.sort_values('DocDate', ascending=False), num_rows="dynamic", use_container_width=True, hide_index=True,
         column_config={
             "DocDate": st.column_config.DateColumn("Ημ/νία"),
@@ -402,7 +400,7 @@ elif menu == "📝 Journal":
             "Bank Account": st.column_config.SelectboxColumn("Τράπεζα", options=st.session_state.bank_list),
             "DocType": st.column_config.SelectboxColumn("Τύπος", options=["Income", "Expense", "Bill", "Equity Distribution"]),
             "Status": st.column_config.SelectboxColumn("Κατάσταση", options=["Paid", "Unpaid"]),
-            "GL Account": st.column_config.SelectboxColumn("GL", options=sorted(list(GL_MAP.keys())))
+            "GL Account": st.column_config.SelectboxColumn("GL", options=gl_options)
         }
     )
     
@@ -428,6 +426,16 @@ elif menu == "⏳ Aging":
 # --- 13. SETTINGS ---
 elif menu == "⚙️ Ρυθμίσεις":
     st.title("⚙️ Ρυθμίσεις")
-    if st.button("🗑️ Hard Reset"):
-        if os.path.exists(DB_FILE): os.remove(DB_FILE)
-        st.rerun()
+    st.write(f"Χρήστης: {st.session_state.username}")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("Λεξικό Λογαριασμών (GL Map)")
+        gl_df = pd.DataFrame(list(GL_MAP.items()), columns=['Κωδικός', 'Περιγραφή'])
+        st.dataframe(gl_df, hide_index=True)
+
+    with col2:
+        st.subheader("Ενέργειες")
+        if st.button("🗑️ Hard Reset (Διαγραφή Βάσης)"):
+            if os.path.exists(DB_FILE): os.remove(DB_FILE)
+            st.rerun()
