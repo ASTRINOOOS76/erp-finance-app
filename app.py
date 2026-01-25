@@ -9,7 +9,7 @@ from datetime import datetime, date
 st.set_page_config(page_title="SalesTree ERP", layout="wide", page_icon="🏢")
 DB_FILE = "erp.db"
 
-# --- CSS (Όπως σου άρεσε) ---
+# --- CSS ---
 st.markdown("""
 <style>
     .stApp { background-color: #f4f6f9; }
@@ -27,44 +27,66 @@ def get_connection():
     return sqlite3.connect(DB_FILE, check_same_thread=False)
 
 def init_and_migrate():
-    """Ελέγχει αν υπάρχει βάση. Αν όχι, διαβάζει το Excel και τη φτιάχνει."""
+    """Ελέγχει αν υπάρχει βάση. Αν όχι, ψάχνει Excel ή ζητάει Upload."""
+    
+    # Περίπτωση 1: Υπάρχει ήδη η βάση -> Προχωράμε
     if os.path.exists(DB_FILE):
-        return # Όλα καλά, η βάση υπάρχει
+        return True
 
-    # Αν δεν υπάρχει βάση, ψάχνουμε το Excel
+    # Περίπτωση 2: Δεν υπάρχει βάση, ψάχνουμε τοπικά Excel
     excel_files = [f for f in os.listdir() if f.endswith('.xlsx') and not f.startswith('~$')]
     
-    if not excel_files:
-        st.warning("⚠️ Δεν βρέθηκε βάση (erp.db) ούτε Excel για αρχική φόρτωση.")
-        return
+    file_to_process = None
+    
+    if excel_files:
+        file_to_process = excel_files[0]
+    else:
+        # Περίπτωση 3: Δεν υπάρχει τίποτα -> Ζητάμε Upload από τον χρήστη
+        st.warning("⚠️ Δεν βρέθηκε βάση δεδομένων ούτε αρχείο Excel.")
+        st.info("📂 Παρακαλώ ανεβάστε το αρχείο Excel (Journal) για να γίνει η αρχική εγκατάσταση.")
+        
+        uploaded_file = st.file_uploader("Σύρετε το αρχείο Excel εδώ", type=['xlsx'])
+        
+        if uploaded_file is not None:
+            # Το σώζουμε προσωρινά για να το διαβάσουμε
+            with open("uploaded_data.xlsx", "wb") as f:
+                f.write(uploaded_file.getbuffer())
+            file_to_process = "uploaded_data.xlsx"
+        else:
+            return False # Σταματάμε εδώ μέχρι να ανεβάσει αρχείο
 
     # Διάβασμα Excel και αποθήκευση σε SQLite
-    try:
-        file_path = excel_files[0]
-        st.toast(f"⏳ Μετατροπή του {file_path} σε Βάση Δεδομένων...", icon="🔄")
-        
-        # Προσπάθεια εύρεσης του σωστού Tab
-        xl = pd.ExcelFile(file_path, engine='openpyxl')
-        sheet = "Journal" if "Journal" in xl.sheet_names else xl.sheet_names[0]
-        
-        df = pd.read_excel(file_path, sheet_name=sheet)
-        
-        # Καθαρισμός ημερομηνιών για να είναι συμβατές με DB
-        df['DocDate'] = pd.to_datetime(df['DocDate'], errors='coerce').dt.strftime('%Y-%m-%d')
-        df['Payment Date'] = pd.to_datetime(df['Payment Date'], errors='coerce').dt.strftime('%Y-%m-%d')
-        
-        # Αποθήκευση
-        conn = get_connection()
-        df.to_sql('journal', conn, if_exists='replace', index=False)
-        conn.close()
-        st.success("✅ Η μετάπτωση ολοκληρώθηκε! Πλέον δουλεύουμε με Βάση Δεδομένων.")
-        st.rerun() # Επανεκκίνηση για να φορτώσει τα νέα δεδομένα
-        
-    except Exception as e:
-        st.error(f"Σφάλμα κατά τη μετάπτωση: {e}")
+    if file_to_process:
+        try:
+            with st.spinner('Γίνεται εγκατάσταση της βάσης δεδομένων...'):
+                xl = pd.ExcelFile(file_to_process, engine='openpyxl')
+                # Ψάχνουμε το σωστό Tab
+                sheet = "Journal" if "Journal" in xl.sheet_names else xl.sheet_names[0]
+                
+                df = pd.read_excel(file_to_process, sheet_name=sheet)
+                
+                # Καθαρισμός ημερομηνιών
+                df['DocDate'] = pd.to_datetime(df['DocDate'], errors='coerce').dt.strftime('%Y-%m-%d')
+                df['Payment Date'] = pd.to_datetime(df['Payment Date'], errors='coerce').dt.strftime('%Y-%m-%d')
+                
+                # Αποθήκευση
+                conn = get_connection()
+                df.to_sql('journal', conn, if_exists='replace', index=False)
+                conn.close()
+                
+            st.success("✅ Η βάση δημιουργήθηκε επιτυχώς!")
+            st.rerun()
+            return True
+            
+        except Exception as e:
+            st.error(f"Σφάλμα κατά τη μετάπτωση: {e}")
+            return False
 
-# Τρέχουμε τον έλεγχο κατά την εκκίνηση
-init_and_migrate()
+# Τρέχουμε τον έλεγχο
+db_ready = init_and_migrate()
+
+if not db_ready:
+    st.stop() # Αν δεν είμαστε έτοιμοι (δεν ανέβηκε αρχείο), σταματάμε εδώ.
 
 # --- 3. ΦΟΡΤΩΣΗ & ΑΠΟΘΗΚΕΥΣΗ ---
 def load_data():
@@ -72,7 +94,6 @@ def load_data():
     try:
         df = pd.read_sql("SELECT * FROM journal", conn)
         
-        # Μετατροπές τύπων για να παίζει σωστά το Grid
         df['DocDate'] = pd.to_datetime(df['DocDate'], errors='coerce')
         df['Payment Date'] = pd.to_datetime(df['Payment Date'], errors='coerce')
         numeric_cols = ['Amount (Net)', 'Amount (Gross)', 'VAT Amount']
@@ -84,12 +105,11 @@ def load_data():
         return df
     except:
         conn.close()
-        return pd.DataFrame() # Κενό αν γίνει λάθος
+        return pd.DataFrame()
 
 def save_data(df_to_save):
     try:
         conn = get_connection()
-        # Μετατροπή ημερομηνιών σε string πάλι για την SQLite
         save_copy = df_to_save.copy()
         save_copy['DocDate'] = save_copy['DocDate'].dt.strftime('%Y-%m-%d')
         save_copy['Payment Date'] = save_copy['Payment Date'].dt.strftime('%Y-%m-%d')
@@ -108,12 +128,12 @@ st.sidebar.title("SalesTree ERP")
 df = load_data()
 
 if df.empty:
-    st.info("Δεν υπάρχουν δεδομένα. Ανέβασε το Excel σου στο φάκελο για να ξεκινήσουμε.")
+    st.error("Η βάση είναι κενή ή κατεστραμμένη. Δοκιμάστε να διαγράψετε το erp.db και να ξανα-ανεβάσετε το Excel.")
     st.stop()
 
 # Global Filters
 years = sorted(df['DocDate'].dt.year.dropna().unique().astype(int), reverse=True)
-if not years: years = [2025] # Fallback
+if not years: years = [2025]
 selected_year = st.sidebar.selectbox("Έτος", years)
 
 df_year = df[df['DocDate'].dt.year == selected_year]
@@ -129,7 +149,6 @@ if menu == "📊 Dashboard":
     exp = df_year[df_year['DocType'].isin(['Expense', 'Bill'])]['Amount (Net)'].sum()
     profit = inc - exp
     
-    # Cashflow (Paid only)
     paid_in = df_year[(df_year['Status']=='Paid') & (df_year['DocType']=='Income')]['Amount (Gross)'].sum()
     paid_out = df_year[(df_year['Status']=='Paid') & (df_year['DocType']!='Income')]['Amount (Gross)'].sum()
     
@@ -152,12 +171,11 @@ if menu == "📊 Dashboard":
         if not exp_df.empty:
             st.plotly_chart(px.pie(exp_df, values='Amount (Net)', names='Category', hole=0.4), use_container_width=True)
 
-# --- ΕΓΓΡΑΦΕΣ (GRID EDITING - ΟΠΩΣ ΤΟ EXCEL) ---
+# --- ΕΓΓΡΑΦΕΣ ---
 elif menu == "📝 Εγγραφές & Επεξεργασία":
     st.title("📝 Διαχείριση Συναλλαγών")
-    st.caption("Επεξεργάσου τα δεδομένα στον πίνακα και πάτα 'Αποθήκευση' στο τέλος.")
+    st.caption("Επεξεργάσου τα δεδομένα και πάτα 'Αποθήκευση'.")
     
-    # Φίλτρα
     c1, c2 = st.columns(2)
     search = c1.text_input("🔍 Αναζήτηση")
     type_filter = c2.multiselect("Φίλτρο Τύπου", df['DocType'].unique())
@@ -168,15 +186,13 @@ elif menu == "📝 Εγγραφές & Επεξεργασία":
     if type_filter:
         df_view = df_view[df_view['DocType'].isin(type_filter)]
 
-    # Λίστα Τραπεζών για Dropdown (δυναμική)
     existing_banks = list(df['Bank Account'].unique())
     default_banks = ['Alpha Bank', 'Eurobank', 'Piraeus', 'National Bank', 'Revolut', 'Ταμείο Μετρητών']
     bank_options = sorted(list(set([x for x in existing_banks + default_banks if str(x) != 'nan'])))
 
-    # DATA EDITOR (Το βασικό εργαλείο)
     edited_df = st.data_editor(
         df_view.sort_values('DocDate', ascending=False),
-        num_rows="dynamic", # Επιτρέπει προσθήκη γραμμών
+        num_rows="dynamic",
         use_container_width=True,
         hide_index=True,
         column_config={
@@ -192,16 +208,9 @@ elif menu == "📝 Εγγραφές & Επεξεργασία":
     )
     
     st.markdown("---")
-    # ΤΟ ΚΟΥΜΠΙ ΠΟΥ ΣΩΖΕΙ ΤΑ ΠΑΝΤΑ
     if st.button("💾 Αποθήκευση Αλλαγών στη Βάση", type="primary"):
-        # Πρέπει να ενώσουμε τις αλλαγές του edited_df με το γενικό df
-        # Για απλότητα στο MVP, υποθέτουμε ότι δουλεύεις στο τρέχον έτος.
-        # Η πιο ασφαλής μέθοδος εδώ: Ξαναφορτώνουμε όλη τη βάση, σβήνουμε τις παλιές εγγραφές του έτους και βάζουμε τις νέες.
-        # ΑΛΛΑ για να μην μπερδευτείς: Θα σώσουμε ΑΥΤΟ που βλέπεις (edited_df) + τα υπόλοιπα έτη από το original df.
-        
         other_years_df = df[df['DocDate'].dt.year != selected_year]
         final_df_to_save = pd.concat([other_years_df, edited_df], ignore_index=True)
-        
         save_data(final_df_to_save)
         st.balloons()
 
@@ -209,7 +218,6 @@ elif menu == "📝 Εγγραφές & Επεξεργασία":
 elif menu == "🏦 Treasury":
     st.title("🏦 Ταμεία & Τράπεζες")
     
-    # Υπολογισμός υπολοίπων (Διαχρονικά)
     df_paid = df[df['Status'] == 'Paid'].copy()
     df_paid['Flow'] = df_paid.apply(lambda x: x['Amount (Gross)'] if x['DocType'] == 'Income' else -x['Amount (Gross)'], axis=1)
     
@@ -229,10 +237,9 @@ elif menu == "🏦 Treasury":
 
 # --- AGING ---
 elif menu == "⏳ Οφειλές":
-    st.title("⏳ Ποιοι χρωστάνε / Ποιους χρωστάμε")
+    st.title("⏳ Οφειλές")
     
     c1, c2 = st.columns(2)
-    
     unpaid_in = df[(df['DocType'] == 'Income') & (df['Status'] == 'Unpaid')]
     unpaid_out = df[(df['DocType'].isin(['Expense', 'Bill'])) & (df['Status'] == 'Unpaid')]
     
