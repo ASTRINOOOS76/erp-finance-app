@@ -7,55 +7,27 @@ from datetime import datetime, date
 
 # --- 1. CONFIG ---
 st.set_page_config(page_title="SalesTree ERP Final", layout="wide", page_icon="🏢")
-DB_FILE = "erp_tax_fixed.db"
+DB_FILE = "erp_tax_fixed_v2.db"
 
-# --- 2. CSS (FIX: ΜΑΥΡΑ ΓΡΑΜΜΑΤΑ ΠΑΝΤΟΥ) ---
+# --- 2. CSS (ΜΑΥΡΑ ΓΡΑΜΜΑΤΑ - ΑΝΑΓΝΩΣΙΜΟΤΗΤΑ) ---
 st.markdown("""
 <style>
-    /* 1. ΦΟΝΤΟ ΕΦΑΡΜΟΓΗΣ - ΛΕΥΚΟ */
-    .stApp {
-        background-color: #ffffff !important;
-    }
-
-    /* 2. ΚΕΙΜΕΝΟ - ΑΝΑΓΚΑΣΤΙΚΑ ΜΑΥΡΟ (GIA NA MHN EINAI ASPRO SE ASPRO) */
-    h1, h2, h3, h4, h5, h6, p, span, div, label, li {
-        color: #000000 !important;
-    }
-
-    /* 3. SIDEBAR */
-    [data-testid="stSidebar"] {
-        background-color: #f8f9fa !important;
-        border-right: 1px solid #ccc !important;
-    }
-
-    /* 4. METRICS (ΤΑ ΚΟΥΤΑΚΙΑ ME TA NOYMERA) */
+    .stApp { background-color: #ffffff !important; }
+    h1, h2, h3, h4, h5, h6, p, span, div, label, li { color: #000000 !important; }
+    [data-testid="stSidebar"] { background-color: #f8f9fa !important; border-right: 1px solid #ccc !important; }
     div[data-testid="metric-container"] {
-        background-color: #f0f2f6 !important; /* Ελαφρύ Γκρι για να ξεχωρίζει */
-        border: 1px solid #000000 !important; /* Μαύρο περίγραμμα */
+        background-color: #f0f2f6 !important;
+        border: 1px solid #000000 !important;
         padding: 10px !important;
         border-radius: 5px !important;
-        box-shadow: 2px 2px 0px rgba(0,0,0,0.2) !important;
     }
-    
-    /* Τα γράμματα μέσα στα Metrics - ΚΑΤΑΜΑΥΡΑ */
-    div[data-testid="metric-container"] label {
-        color: #000000 !important;
-        font-weight: bold !important;
-    }
-    div[data-testid="metric-container"] [data-testid="stMetricValue"] {
-        color: #000000 !important;
-    }
-
-    /* 5. INPUTS & BUTTONS */
+    div[data-testid="metric-container"] label { color: #000000 !important; font-weight: bold !important; }
+    div[data-testid="metric-container"] [data-testid="stMetricValue"] { color: #000000 !important; }
     .stTextInput input, .stNumberInput input, .stSelectbox div {
-        background-color: #ffffff !important;
-        color: #000000 !important;
-        border: 1px solid #000000 !important;
+        background-color: #ffffff !important; color: #000000 !important; border: 1px solid #000000 !important;
     }
     .stButton>button {
-        background-color: #000000 !important;
-        color: #ffffff !important;
-        border: none !important;
+        background-color: #000000 !important; color: #ffffff !important; border: none !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -227,7 +199,7 @@ elif menu == "📝 Νέα Εγγραφή":
             st.success("✅ Καταχωρήθηκε!")
             st.session_state.c_net = 0.0; st.rerun()
 
-# --- VAT & TAX REPORT (NEW MODULE) ---
+# --- VAT & TAX REPORT (FIXED LOGIC) ---
 elif menu == "📊 ΦΠΑ & Φόροι (Report)":
     st.title("📊 Αναφορές ΦΠΑ & Φόρου Εισοδήματος")
     
@@ -261,7 +233,7 @@ elif menu == "📊 ΦΠΑ & Φόροι (Report)":
         c2.metric("ΦΠΑ Αγορών (Εισροές)", f"€{vat_paid:,.2f}")
         c3.metric("Αποτέλεσμα ΦΠΑ", f"€{vat_balance:,.2f}", delta="Πληρωμή" if vat_balance > 0 else "Επιστροφή", delta_color="inverse")
         
-        # --- B. ΦΟΡΟΣ ΕΙΣΟΔΗΜΑΤΟΣ (CUSTOM RATE) ---
+        # --- B. ΦΟΡΟΣ ΕΙΣΟΔΗΜΑΤΟΣ (CUSTOM RATE + ZERO TAX ON LOSS) ---
         st.markdown("---")
         st.header("2. Υπολογισμός Φόρου Εισοδήματος")
         
@@ -271,17 +243,28 @@ elif menu == "📊 ΦΠΑ & Φόροι (Report)":
         net_profit = net_inc - net_exp
         
         # Input for Tax Rate
-        st.info("👇 **Ρύθμιση Συντελεστή:** Άλλαξε το ποσοστό εδώ για να δεις τον φόρο.")
+        st.info("👇 **Ρύθμιση Συντελεστή:** Άλλαξε το ποσοστό εδώ.")
         tax_rate = st.number_input("Συντελεστής Φόρου (%)", value=24.0, step=1.0, format="%.1f")
         
-        tax_amount = net_profit * (tax_rate / 100.0)
+        # LOGIC FIX: Αν υπάρχει ζημιά, φόρος = 0
+        if net_profit > 0:
+            tax_amount = net_profit * (tax_rate / 100.0)
+            final_profit = net_profit - tax_amount
+            msg_color = "normal"
+        else:
+            tax_amount = 0.0
+            final_profit = net_profit
+            msg_color = "off"
         
         k1, k2, k3 = st.columns(3)
         k1.metric("Καθαρά Έσοδα", f"€{net_inc:,.2f}")
         k2.metric("Καθαρά Έξοδα", f"€{net_exp:,.2f}")
-        k3.metric(f"Φόρος ({tax_rate}%)", f"€{tax_amount:,.2f}", delta="-Φόρος", delta_color="inverse")
+        k3.metric(f"Φόρος ({tax_rate}%)", f"€{tax_amount:,.2f}", delta="-Φόρος" if net_profit>0 else "Ζημίες Χρήσης", delta_color="inverse")
         
-        st.success(f"💰 **Καθαρό Κέρδος μετά από Φόρους:** €{(net_profit - tax_amount):,.2f}")
+        if net_profit > 0:
+            st.success(f"💰 **Καθαρό Κέρδος μετά από Φόρους:** €{final_profit:,.2f}")
+        else:
+            st.error(f"📉 **Ζημιά Περιόδου:** €{abs(final_profit):,.2f} (Δεν υπολογίζεται φόρος)")
 
 # --- LEDGERS ---
 elif menu == "📇 Καρτέλες (Ledgers)":
