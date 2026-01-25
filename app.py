@@ -7,28 +7,98 @@ import io
 import os
 from datetime import datetime, date
 
-# --- 1. ΡΥΘΜΙΣΕΙΣ & CSS ---
+# --- 1. ΡΥΘΜΙΣΕΙΣ & HIGH CONTRAST CSS ---
 st.set_page_config(page_title="SalesTree ERP", layout="wide", page_icon="🏢")
 DB_FILE = "erp.db"
 
+# ΕΔΩ ΕΙΝΑΙ Η ΑΛΛΑΓΗ ΓΙΑ ΤΑ ΧΡΩΜΑΤΑ
 st.markdown("""
 <style>
+    /* Φόντο Εφαρμογής - Απαλό Γκρι για ξεκούραση ματιών */
+    .stApp {
+        background-color: #f0f2f6;
+    }
+    
+    /* Τίτλοι - Σκούρο Μπλε για έντονη αντίθεση */
+    h1, h2, h3, h4, h5, h6 {
+        color: #0f172a !important; 
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        font-weight: 700 !important;
+    }
+    
+    /* Κείμενο - Καθαρό Μαύρο */
+    p, div, label, span {
+        color: #1e293b !important;
+    }
+
+    /* Metrics (Κουτάκια με νούμερα) - Άσπρο κουτί με μπλε μπάρα αριστερά */
     div[data-testid="metric-container"] {
-        background-color: #ffffff; border: 1px solid #e0e0e0;
-        padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        background-color: #ffffff !important;
+        border-left: 5px solid #2563eb !important; /* Έντονο Μπλε */
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06) !important;
+        padding: 15px !important;
+        border-radius: 8px !important;
     }
-    .stTabs [data-baseweb="tab-list"] { gap: 10px; }
+    
+    /* Νούμερα μέσα στα Metrics - Σκούρα */
+    div[data-testid="metric-container"] label {
+        color: #64748b !important; /* Γκρι τίτλος */
+    }
+    div[data-testid="metric-container"] div[data-testid="stMetricValue"] {
+        color: #0f172a !important; /* Μαύρο νούμερο */
+        font-weight: bold !important;
+    }
+
+    /* Tabs - Στυλ Καρτέλας */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+        background-color: transparent;
+    }
     .stTabs [data-baseweb="tab"] {
-        height: 50px; background-color: #f0f2f6; border-radius: 5px;
-        padding-top: 10px; padding-bottom: 10px;
+        background-color: #e2e8f0 !important; /* Ανοιχτό γκρι όταν δεν είναι πατημένο */
+        border-radius: 5px;
+        color: #000000 !important;
+        padding: 10px 20px;
+        font-weight: 600;
+        border: 1px solid #cbd5e1;
     }
-    .stTabs [aria-selected="true"] { background-color: #4CAF50; color: white; }
-    .stButton>button { width: 100%; border-radius: 5px; background-color: #2c3e50; color: white; }
+    /* Επιλεγμένο Tab - Σκούρο Μπλε με Λευκά γράμματα */
+    .stTabs [aria-selected="true"] {
+        background-color: #1e3a8a !important; 
+        color: #ffffff !important;
+    }
+    .stTabs [aria-selected="true"] p {
+        color: #ffffff !important;
+    }
+
+    /* Κουμπιά - Σκούρο Μπλε */
+    .stButton>button {
+        background-color: #1e3a8a !important;
+        color: white !important;
+        border-radius: 6px;
+        font-weight: bold;
+        border: none;
+        padding: 0.5rem 1rem;
+    }
+    .stButton>button:hover {
+        background-color: #1e40af !important; /* Λίγο πιο ανοιχτό στο ποντίκι */
+        color: white !important;
+    }
+    .stButton>button p {
+        color: white !important;
+    }
+    
+    /* Data Editor / Tables - Καθαρό λευκό φόντο */
+    div[data-testid="stDataEditor"] {
+        background-color: white;
+        border-radius: 10px;
+        padding: 10px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# --- GL ACCOUNTS MAP (Λεξικό Κωδικών) ---
-# Αυτό συνδέει τον κωδικό με την περιγραφή για το Ισοζύγιο
+# --- GL ACCOUNTS MAP ---
 GL_MAP = {
     4000: "Πωλήσεις / Έσοδα Υπηρεσιών",
     5000: "Κόστος Πωληθέντων (Αγορές)",
@@ -71,7 +141,6 @@ def init_db_and_migrate():
                 sheet = "Journal" if "Journal" in xl.sheet_names else xl.sheet_names[0]
                 df = pd.read_excel(file_to_load, sheet_name=sheet)
                 
-                # --- ΕΞΥΠΝΟΣ ΚΑΘΑΡΙΣΜΟΣ ΣΤΗΛΩΝ ---
                 df.columns = df.columns.str.strip()
                 rename_map = {
                     'Date': 'DocDate', 'Ημερομηνία': 'DocDate', 
@@ -79,11 +148,9 @@ def init_db_and_migrate():
                 }
                 df.rename(columns=rename_map, inplace=True)
                 
-                # Default GL Account αν λείπει
                 if 'GL Account' not in df.columns:
                     df['GL Account'] = 0
 
-                # Καθαρισμός ημερομηνιών
                 df['DocDate'] = pd.to_datetime(df['DocDate'], errors='coerce').dt.strftime('%Y-%m-%d')
                 if 'Payment Date' in df.columns:
                     df['Payment Date'] = pd.to_datetime(df['Payment Date'], errors='coerce').dt.strftime('%Y-%m-%d')
@@ -221,7 +288,7 @@ if menu == "📊 Dashboard":
     st.divider()
     
     # SMART ANALYTICS (Top Clients)
-    st.subheader("🏆 Smart Analytics (Top Performers)")
+    st.subheader("🏆 Smart Analytics")
     c1, c2 = st.columns(2)
     
     with c1:
@@ -242,7 +309,7 @@ if menu == "📊 Dashboard":
 
 # --- 7. ΙΣΟΖΥΓΙΟ (TRIAL BALANCE) ---
 elif menu == "⚖️ Ισοζύγιο":
-    st.title("⚖️ Ισοζύγιο Λογαριασμών (Trial Balance)")
+    st.title("⚖️ Ισοζύγιο Λογαριασμών")
     st.caption("Συγκεντρωτική εικόνα ανά Κωδικό Λογιστικής (GL Code).")
 
     # Group by GL Account
@@ -288,8 +355,8 @@ elif menu == "🖨️ Αναφορές":
         col2.metric("ΦΠΑ Εισροών (Αγορές)", f"€{vat_in:,.2f}")
         col3.metric("Αποτέλεσμα", f"€{vat_result:,.2f}", delta="Πληρωμή" if vat_result > 0 else "Επιστροφή", delta_color="inverse")
         
-        # Detail Table for VAT
-        st.write("Αναλυτικές Κινήσεις ΦΠΑ:")
+        st.divider()
+        st.write("**Αναλυτικές Κινήσεις ΦΠΑ:**")
         vat_df = df_filtered[df_filtered['VAT Amount'] != 0][['DocDate', 'DocType', 'Counterparty', 'VAT Amount']]
         st.dataframe(vat_df, use_container_width=True)
         
@@ -305,7 +372,6 @@ elif menu == "🖨️ Αναφορές":
         pl_data = df_filtered[df_filtered['DocType'].isin(['Income', 'Expense', 'Bill'])]
         pl_grouped = pl_data.groupby(['DocType', 'Category'])['Amount (Net)'].sum().reset_index()
         
-        # Pivot for cleaner look
         try:
             pl_pivot = pl_grouped.pivot(index='Category', columns='DocType', values='Amount (Net)').fillna(0)
             st.dataframe(pl_pivot.style.highlight_max(axis=0), use_container_width=True)
@@ -399,7 +465,6 @@ elif menu == "⚙️ Ρυθμίσεις":
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Λεξικό Λογαριασμών (GL Map)")
-        # Δείχνουμε το λεξικό GL_MAP σε πίνακα
         gl_df = pd.DataFrame(list(GL_MAP.items()), columns=['Κωδικός', 'Περιγραφή'])
         st.dataframe(gl_df, hide_index=True)
 
