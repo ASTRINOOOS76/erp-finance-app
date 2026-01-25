@@ -7,93 +7,69 @@ import io
 import os
 from datetime import datetime, date
 
-# --- 1. ΡΥΘΜΙΣΕΙΣ & HIGH CONTRAST CSS ---
+# --- 1. ΡΥΘΜΙΣΕΙΣ ΣΕΛΙΔΑΣ ---
 st.set_page_config(page_title="SalesTree ERP", layout="wide", page_icon="🏢")
 DB_FILE = "erp.db"
 
-# ΕΔΩ ΕΙΝΑΙ Η ΑΛΛΑΓΗ ΓΙΑ ΤΑ ΧΡΩΜΑΤΑ
+# --- CSS (ΔΙΟΡΘΩΜΕΝΟ - ΚΑΘΑΡΟ & ΕΥΑΝΑΓΝΩΣΤΟ) ---
 st.markdown("""
 <style>
-    /* Φόντο Εφαρμογής - Απαλό Γκρι για ξεκούραση ματιών */
+    /* Γενικό Φόντο - Ανοιχτό */
     .stApp {
-        background-color: #f0f2f6;
+        background-color: #ffffff;
     }
     
-    /* Τίτλοι - Σκούρο Μπλε για έντονη αντίθεση */
-    h1, h2, h3, h4, h5, h6 {
-        color: #0f172a !important; 
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        font-weight: 700 !important;
-    }
-    
-    /* Κείμενο - Καθαρό Μαύρο */
-    p, div, label, span {
-        color: #1e293b !important;
+    /* Sidebar - Απαλό Γκρι */
+    [data-testid="stSidebar"] {
+        background-color: #f8f9fa;
+        border-right: 1px solid #ddd;
     }
 
-    /* Metrics (Κουτάκια με νούμερα) - Άσπρο κουτί με μπλε μπάρα αριστερά */
-    div[data-testid="metric-container"] {
-        background-color: #ffffff !important;
-        border-left: 5px solid #2563eb !important; /* Έντονο Μπλε */
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06) !important;
-        padding: 15px !important;
-        border-radius: 8px !important;
-    }
-    
-    /* Νούμερα μέσα στα Metrics - Σκούρα */
-    div[data-testid="metric-container"] label {
-        color: #64748b !important; /* Γκρι τίτλος */
-    }
-    div[data-testid="metric-container"] div[data-testid="stMetricValue"] {
-        color: #0f172a !important; /* Μαύρο νούμερο */
-        font-weight: bold !important;
-    }
-
-    /* Tabs - Στυλ Καρτέλας */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-        background-color: transparent;
-    }
-    .stTabs [data-baseweb="tab"] {
-        background-color: #e2e8f0 !important; /* Ανοιχτό γκρι όταν δεν είναι πατημένο */
-        border-radius: 5px;
+    /* Κείμενα - ΟΛΑ ΜΑΥΡΑ και ΕΥΑΝΑΓΝΩΣΤΑ */
+    h1, h2, h3, p, label, div, span {
         color: #000000 !important;
-        padding: 10px 20px;
-        font-weight: 600;
-        border: 1px solid #cbd5e1;
-    }
-    /* Επιλεγμένο Tab - Σκούρο Μπλε με Λευκά γράμματα */
-    .stTabs [aria-selected="true"] {
-        background-color: #1e3a8a !important; 
-        color: #ffffff !important;
-    }
-    .stTabs [aria-selected="true"] p {
-        color: #ffffff !important;
+        font-family: sans-serif;
     }
 
-    /* Κουμπιά - Σκούρο Μπλε */
+    /* Μενού (Sidebar Radio) - Να φαίνονται πάντα */
+    .stRadio label {
+        color: #000000 !important;
+        font-weight: 600 !important;
+        font-size: 16px !important;
+    }
+
+    /* Metrics (Κουτάκια) - Με σκιά για να ξεχωρίζουν */
+    div[data-testid="metric-container"] {
+        background-color: #f0f2f6;
+        border: 1px solid #d1d5db;
+        padding: 15px;
+        border-radius: 8px;
+        box-shadow: 2px 2px 5px rgba(0,0,0,0.1);
+    }
+    
+    /* Κουμπιά - Σκούρο χρώμα για αντίθεση */
     .stButton>button {
-        background-color: #1e3a8a !important;
+        background-color: #2c3e50 !important;
         color: white !important;
-        border-radius: 6px;
         font-weight: bold;
+        border-radius: 5px;
         border: none;
-        padding: 0.5rem 1rem;
     }
     .stButton>button:hover {
-        background-color: #1e40af !important; /* Λίγο πιο ανοιχτό στο ποντίκι */
-        color: white !important;
-    }
-    .stButton>button p {
-        color: white !important;
+        background-color: #1a252f !important;
     }
     
-    /* Data Editor / Tables - Καθαρό λευκό φόντο */
-    div[data-testid="stDataEditor"] {
-        background-color: white;
-        border-radius: 10px;
-        padding: 10px;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+    /* Tabs - Ξεκάθαρα */
+    .stTabs [data-baseweb="tab-list"] { gap: 5px; }
+    .stTabs [data-baseweb="tab"] {
+        background-color: #e2e8f0;
+        color: #000000 !important;
+        border-radius: 4px;
+        font-weight: bold;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #2563eb !important; /* Μπλε επιλογής */
+        color: white !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -148,8 +124,7 @@ def init_db_and_migrate():
                 }
                 df.rename(columns=rename_map, inplace=True)
                 
-                if 'GL Account' not in df.columns:
-                    df['GL Account'] = 0
+                if 'GL Account' not in df.columns: df['GL Account'] = 0
 
                 df['DocDate'] = pd.to_datetime(df['DocDate'], errors='coerce').dt.strftime('%Y-%m-%d')
                 if 'Payment Date' in df.columns:
@@ -235,7 +210,6 @@ if not init_db_and_migrate():
 if 'df' not in st.session_state:
     st.session_state.df = load_data_from_db()
 
-# Αν η βάση είναι άδεια
 if st.session_state.df.empty:
     st.warning("⚠️ Η βάση είναι κενή.")
     if st.button("🗑️ Διαγραφή & Επανεκκίνηση"):
@@ -258,7 +232,6 @@ if st.sidebar.button("Logout"):
     st.rerun()
 st.sidebar.divider()
 
-# Dates
 today = date.today()
 dates = st.sidebar.date_input("Περίοδος", value=(date(today.year, 1, 1), date(today.year, 12, 31)), format="DD/MM/YYYY")
 if len(dates) == 2:
@@ -267,7 +240,6 @@ if len(dates) == 2:
 else:
     df_filtered = df
 
-# --- ΝΕΟ ΜΕΝΟΥ ---
 menu = st.sidebar.radio("Μενού", 
     ["📊 Dashboard", "⚖️ Ισοζύγιο", "🖨️ Αναφορές", "🏦 Treasury", "📝 Journal", "⏳ Aging", "⚙️ Ρυθμίσεις"]
 )
@@ -287,7 +259,7 @@ if menu == "📊 Dashboard":
     
     st.divider()
     
-    # SMART ANALYTICS (Top Clients)
+    # SMART ANALYTICS
     st.subheader("🏆 Smart Analytics")
     c1, c2 = st.columns(2)
     
@@ -307,37 +279,29 @@ if menu == "📊 Dashboard":
         else:
             st.info("Δεν υπάρχουν έξοδα.")
 
-# --- 7. ΙΣΟΖΥΓΙΟ (TRIAL BALANCE) ---
+# --- 7. ΙΣΟΖΥΓΙΟ ---
 elif menu == "⚖️ Ισοζύγιο":
     st.title("⚖️ Ισοζύγιο Λογαριασμών")
     st.caption("Συγκεντρωτική εικόνα ανά Κωδικό Λογιστικής (GL Code).")
 
-    # Group by GL Account
     tb = df_filtered.groupby('GL Account').agg({
         'Amount (Net)': 'sum',
         'Amount (Gross)': 'sum'
     }).reset_index()
 
-    # Map Descriptions
     tb['Περιγραφή'] = tb['GL Account'].map(GL_MAP).fillna("Άγνωστος Λογαριασμός")
-    
-    # Reorder columns
     tb = tb[['GL Account', 'Περιγραφή', 'Amount (Net)', 'Amount (Gross)']]
     tb.columns = ['Κωδικός', 'Περιγραφή Λογαριασμού', 'Καθαρό Ποσό', 'Μικτό Ποσό']
-    
-    # Sort
     tb = tb.sort_values('Κωδικός')
 
-    # Display
     st.dataframe(tb, use_container_width=True, hide_index=True)
     
-    # Export
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine='xlsxwriter') as writer:
         tb.to_excel(writer, sheet_name='Trial Balance', index=False)
     st.download_button("🖨️ Εκτύπωση (Λήψη Excel)", buf, "Trial_Balance.xlsx", type="primary")
 
-# --- 8. ΑΝΑΦΟΡΕΣ (REPORTS) ---
+# --- 8. ΑΝΑΦΟΡΕΣ ---
 elif menu == "🖨️ Αναφορές":
     st.title("🖨️ Κέντρο Αναφορών")
     
@@ -360,7 +324,6 @@ elif menu == "🖨️ Αναφορές":
         vat_df = df_filtered[df_filtered['VAT Amount'] != 0][['DocDate', 'DocType', 'Counterparty', 'VAT Amount']]
         st.dataframe(vat_df, use_container_width=True)
         
-        # Print Button
         buf_vat = io.BytesIO()
         with pd.ExcelWriter(buf_vat, engine='xlsxwriter') as writer:
             vat_df.to_excel(writer, sheet_name='VAT Report', index=False)
@@ -368,7 +331,6 @@ elif menu == "🖨️ Αναφορές":
 
     with tab2:
         st.subheader("Αποτελέσματα Χρήσης (P&L)")
-        
         pl_data = df_filtered[df_filtered['DocType'].isin(['Income', 'Expense', 'Bill'])]
         pl_grouped = pl_data.groupby(['DocType', 'Category'])['Amount (Net)'].sum().reset_index()
         
@@ -376,7 +338,6 @@ elif menu == "🖨️ Αναφορές":
             pl_pivot = pl_grouped.pivot(index='Category', columns='DocType', values='Amount (Net)').fillna(0)
             st.dataframe(pl_pivot.style.highlight_max(axis=0), use_container_width=True)
             
-            # Print Button
             buf_pl = io.BytesIO()
             with pd.ExcelWriter(buf_pl, engine='xlsxwriter') as writer:
                 pl_pivot.to_excel(writer, sheet_name='PnL')
@@ -425,7 +386,6 @@ elif menu == "📝 Journal":
     if s_txt: v = v[v.astype(str).apply(lambda x: x.str.contains(s_txt, case=False)).any(axis=1)]
     if t_flt: v = v[v['DocType'].isin(t_flt)]
 
-    # Φτιάχνουμε λίστα επιλογών για GL Account (Κωδικός - Περιγραφή)
     gl_options = sorted(list(GL_MAP.keys()))
 
     edf = st.data_editor(v.sort_values('DocDate', ascending=False), num_rows="dynamic", use_container_width=True, hide_index=True,
