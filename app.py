@@ -5,36 +5,58 @@ import plotly.express as px
 import os
 from datetime import datetime, date
 
-# --- 1. CONFIG & THEME ---
-st.set_page_config(page_title="SalesTree ERP Tax", layout="wide", page_icon="🏢")
-DB_FILE = "erp_tax_v5.db"
+# --- 1. CONFIG ---
+st.set_page_config(page_title="SalesTree ERP Final", layout="wide", page_icon="🏢")
+DB_FILE = "erp_tax_fixed.db"
 
-# --- 2. CSS (PROFESSIONAL & CLEAN) ---
+# --- 2. CSS (FIX: ΜΑΥΡΑ ΓΡΑΜΜΑΤΑ ΠΑΝΤΟΥ) ---
 st.markdown("""
 <style>
-    /* Global */
-    .stApp { background-color: #ffffff; color: #000000; font-family: 'Segoe UI', sans-serif; }
-    
-    /* Sidebar */
-    [data-testid="stSidebar"] { background-color: #f8f9fa; border-right: 1px solid #dee2e6; }
-    [data-testid="stSidebar"] * { color: #212529 !important; font-weight: 600; }
-    
-    /* Inputs */
-    .stTextInput input, .stNumberInput input, .stSelectbox div {
-        background-color: #fff !important; color: #000 !important; border: 1px solid #ced4da !important; border-radius: 4px;
+    /* 1. ΦΟΝΤΟ ΕΦΑΡΜΟΓΗΣ - ΛΕΥΚΟ */
+    .stApp {
+        background-color: #ffffff !important;
     }
-    
-    /* Metrics */
+
+    /* 2. ΚΕΙΜΕΝΟ - ΑΝΑΓΚΑΣΤΙΚΑ ΜΑΥΡΟ (GIA NA MHN EINAI ASPRO SE ASPRO) */
+    h1, h2, h3, h4, h5, h6, p, span, div, label, li {
+        color: #000000 !important;
+    }
+
+    /* 3. SIDEBAR */
+    [data-testid="stSidebar"] {
+        background-color: #f8f9fa !important;
+        border-right: 1px solid #ccc !important;
+    }
+
+    /* 4. METRICS (ΤΑ ΚΟΥΤΑΚΙΑ ME TA NOYMERA) */
     div[data-testid="metric-container"] {
-        background-color: #fff; border: 1px solid #dee2e6; border-left: 5px solid #0d6efd;
-        padding: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        background-color: #f0f2f6 !important; /* Ελαφρύ Γκρι για να ξεχωρίζει */
+        border: 1px solid #000000 !important; /* Μαύρο περίγραμμα */
+        padding: 10px !important;
+        border-radius: 5px !important;
+        box-shadow: 2px 2px 0px rgba(0,0,0,0.2) !important;
     }
     
-    /* Buttons */
-    .stButton>button {
-        background-color: #212529 !important; color: #fff !important; border: none; font-weight: bold; padding: 0.5rem 1rem;
+    /* Τα γράμματα μέσα στα Metrics - ΚΑΤΑΜΑΥΡΑ */
+    div[data-testid="metric-container"] label {
+        color: #000000 !important;
+        font-weight: bold !important;
     }
-    .stButton>button:hover { background-color: #495057 !important; }
+    div[data-testid="metric-container"] [data-testid="stMetricValue"] {
+        color: #000000 !important;
+    }
+
+    /* 5. INPUTS & BUTTONS */
+    .stTextInput input, .stNumberInput input, .stSelectbox div {
+        background-color: #ffffff !important;
+        color: #000000 !important;
+        border: 1px solid #000000 !important;
+    }
+    .stButton>button {
+        background-color: #000000 !important;
+        color: #ffffff !important;
+        border: none !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -45,7 +67,6 @@ def get_conn():
 def init_db():
     conn = get_conn()
     c = conn.cursor()
-    # Journal Table
     c.execute('''CREATE TABLE IF NOT EXISTS journal (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         doc_date DATE, doc_no TEXT, doc_type TEXT,
@@ -53,20 +74,15 @@ def init_db():
         amount_net REAL, vat_amount REAL, amount_gross REAL,
         payment_method TEXT, bank_account TEXT, status TEXT
     )''')
-    
-    # GL Table (Παραμετροποιήσιμο)
     c.execute('''CREATE TABLE IF NOT EXISTS gl_codes (
         code TEXT PRIMARY KEY, description TEXT
     )''')
-    
-    # Default GL if empty
     try:
         if c.execute("SELECT count(*) FROM gl_codes").fetchone()[0] == 0:
             defaults = [("100", "Πωλήσεις"), ("200", "Αγορές"), ("300", "Ταμείο"), ("400", "Τράπεζες"), ("600", "Γενικά Έξοδα")]
             c.executemany("INSERT INTO gl_codes VALUES (?,?)", defaults)
             conn.commit()
     except: pass
-    
     conn.commit(); conn.close()
 
 init_db()
@@ -95,7 +111,7 @@ conn.close()
 
 if count == 0:
     st.title("⚠️ Εγκατάσταση")
-    st.info("Η βάση είναι κενή. Ανεβάστε το Excel ή ξεκινήστε από το μηδέν.")
+    st.info("Η βάση είναι κενή.")
     c1, c2 = st.columns(2)
     up = c1.file_uploader("Upload Excel", type=['xlsx'])
     if up:
@@ -135,7 +151,7 @@ st.sidebar.divider()
 menu = st.sidebar.radio("ΜΕΝΟΥ", [
     "📊 Dashboard",
     "📝 Νέα Εγγραφή",
-    "📊 ΦΠΑ & Φόροι (Report)",  # <--- ΤΟ ΝΕΟ MODULE
+    "📊 ΦΠΑ & Φόροι (Report)",
     "📇 Καρτέλες (Ledgers)",
     "📚 Αρχείο & Διορθώσεις",
     "💵 Ταμείο & Τράπεζες",
@@ -241,8 +257,8 @@ elif menu == "📊 ΦΠΑ & Φόροι (Report)":
         vat_balance = vat_collected - vat_paid
         
         c1, c2, c3 = st.columns(3)
-        c1.metric("ΦΠΑ Πωλήσεων (Εκροές)", f"€{vat_collected:,.2f}", "+")
-        c2.metric("ΦΠΑ Αγορών (Εισροές)", f"€{vat_paid:,.2f}", "-")
+        c1.metric("ΦΠΑ Πωλήσεων (Εκροές)", f"€{vat_collected:,.2f}")
+        c2.metric("ΦΠΑ Αγορών (Εισροές)", f"€{vat_paid:,.2f}")
         c3.metric("Αποτέλεσμα ΦΠΑ", f"€{vat_balance:,.2f}", delta="Πληρωμή" if vat_balance > 0 else "Επιστροφή", delta_color="inverse")
         
         # --- B. ΦΟΡΟΣ ΕΙΣΟΔΗΜΑΤΟΣ (CUSTOM RATE) ---
