@@ -49,14 +49,6 @@ def load_data(file_path):
         # Διάβασμα Journal
         df = pd.read_excel(file_path, sheet_name="Journal", engine='openpyxl')
         
-        # Προσπάθεια ανάγνωσης Master Data (για Τράπεζες)
-        try:
-            banks_df = pd.read_excel(file_path, sheet_name="Master_Data", engine='openpyxl')
-            # Ψάχνουμε τη στήλη με τα ονόματα τραπεζών (υποθέτουμε ότι υπάρχει)
-            # Αν δεν υπάρχει, θα φτιάξουμε μια dummy λίστα
-        except:
-            banks_df = pd.DataFrame()
-
         # Καθαρισμός Journal
         df['DocDate'] = pd.to_datetime(df['DocDate'], errors='coerce')
         df['Payment Date'] = pd.to_datetime(df['Payment Date'], errors='coerce')
@@ -67,7 +59,7 @@ def load_data(file_path):
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
         
         # Εξασφάλιση απαραίτητων στηλών
-        cols_needed = ['DocType', 'Payment Method', 'Bank Account', 'Counterparty', 'Status', 'Description']
+        cols_needed = ['DocType', 'Payment Method', 'Bank Account', 'Counterparty', 'Status', 'Description', 'Category']
         for c in cols_needed:
             if c not in df.columns:
                 df[c] = ""
@@ -110,6 +102,10 @@ st.sidebar.divider()
 
 # Global Filter
 years = sorted(df['DocDate'].dt.year.dropna().unique().astype(int), reverse=True)
+if not years:
+    st.error("Δεν βρέθηκαν ημερομηνίες στο αρχείο.")
+    st.stop()
+
 selected_year = st.sidebar.selectbox("Οικονομική Χρήση", years)
 df_year = df[df['DocDate'].dt.year == selected_year]
 
@@ -155,7 +151,8 @@ if menu == "📊 Dashboard":
         st.subheader("🍰 Κέντρα Κόστους")
         exp = df_year[df_year['DocType'].isin(['Expense', 'Bill'])]
         if not exp.empty:
-            fig2 = px.donut(exp, values='Amount (Net)', names='Category', hole=0.4)
+            # ΔΙΟΡΘΩΣΗ: Αλλάξαμε το px.donut σε px.pie με hole=0.4
+            fig2 = px.pie(exp, values='Amount (Net)', names='Category', hole=0.4)
             st.plotly_chart(fig2, use_container_width=True)
         else:
             st.info("Δεν υπάρχουν έξοδα.")
@@ -169,7 +166,6 @@ elif menu == "🏦 Treasury (Ταμεία & Τράπεζες)":
     
     with tab1:
         # Υπολογισμός υπολοίπων ανά τράπεζα (Running Total από την αρχή του χρόνου έως σήμερα)
-        # Προσοχή: Εδώ παίρνουμε ΟΛΑ τα έτη για να βγει το σωστό υπόλοιπο, όχι μόνο το selected_year
         df_paid = df[df['Status'] == 'Paid'].copy()
         
         # Λογική: Income προσθέτει, Expense αφαιρεί
@@ -188,14 +184,17 @@ elif menu == "🏦 Treasury (Ταμεία & Τράπεζες)":
         # Grid με κάρτες για κάθε τράπεζα
         st.subheader("Διαθέσιμα ανά Λογαριασμό")
         
-        cols = st.columns(3)
-        for index, row in balances.iterrows():
-            col = cols[index % 3]
-            bank_name = row['Τράπεζα / Ταμείο']
-            amount = row['Υπόλοιπο']
-            if bank_name: # Αν δεν είναι κενό
-                with col:
-                    st.info(f"**{bank_name}**\n\n### €{amount:,.2f}")
+        if not balances.empty:
+            cols = st.columns(3)
+            for index, row in balances.iterrows():
+                col = cols[index % 3]
+                bank_name = row['Τράπεζα / Ταμείο']
+                amount = row['Υπόλοιπο']
+                if bank_name: # Αν δεν είναι κενό
+                    with col:
+                        st.info(f"**{bank_name}**\n\n### €{amount:,.2f}")
+        else:
+            st.info("Δεν υπάρχουν κινήσεις για εμφάνιση υπολοίπων.")
 
     with tab2:
         st.subheader("Κίνηση Λογαριασμών")
@@ -282,12 +281,7 @@ elif menu == "📝 Journal (Εγγραφές)":
     
     # Save changes logic (simple update of session state)
     if not edited_df.equals(df_display):
-        # Update logic needs to be robust in full app, here we assume direct update for filtered view
-        # For simplicity in this demo, we assume user is editing the filtered view and we might lose data if not careful.
-        # So we warn:
         st.warning("⚠️ Πραγματοποιείτε αλλαγές. Μην ξεχάσετε να πατήσετε το 'SAVE' κουμπί επάνω.")
-        # In a real app, we would merge 'edited_df' back into 'st.session_state.df' using Index matching.
-        # For MVP: We update the master dataframe
         st.session_state.df.update(edited_df)
 
 # --- 4. AGING (Debts) ---
@@ -311,8 +305,11 @@ elif menu == "⏳ Aging & Debts (Οφειλές)":
         unpaid_income['Period'] = unpaid_income['DaysOpen'].apply(get_bucket)
         
         # Pivot Table
-        aging_pivot = unpaid_income.pivot_table(index='Counterparty', columns='Period', values='Amount (Gross)', aggfunc='sum', fill_value=0)
-        st.dataframe(aging_pivot.style.background_gradient(cmap="Reds", axis=None).format("€{:.2f}"), use_container_width=True)
+        try:
+            aging_pivot = unpaid_income.pivot_table(index='Counterparty', columns='Period', values='Amount (Gross)', aggfunc='sum', fill_value=0)
+            st.dataframe(aging_pivot.style.background_gradient(cmap="Reds", axis=None).format("€{:.2f}"), use_container_width=True)
+        except:
+             st.dataframe(unpaid_income[['Counterparty', 'Amount (Gross)', 'Period']])
     else:
         st.success("Κανένας πελάτης δεν χρωστάει!")
 
