@@ -7,7 +7,7 @@ import os
 from datetime import datetime, date
 
 # --- 1. ΡΥΘΜΙΣΕΙΣ ΣΕΛΙΔΑΣ ---
-st.set_page_config(page_title="SalesTree ERP", layout="wide", page_icon="🔐")
+st.set_page_config(page_title="SalesTree ERP", layout="wide", page_icon="🏢")
 
 # --- CSS (Στυλ) ---
 st.markdown("""
@@ -30,8 +30,6 @@ st.markdown("""
 
 # --- 2. ΣΥΣΤΗΜΑ LOGIN ---
 def check_login():
-    # Ορίστε εδώ τους χρήστες και κωδικούς
-    # Format: "username": "password"
     users = {
         "admin": "admin123",
         "user": "1234"
@@ -41,27 +39,24 @@ def check_login():
         st.session_state.logged_in = False
 
     if not st.session_state.logged_in:
-        # Εμφάνιση φόρμας Login
         col1, col2, col3 = st.columns([1,2,1])
         with col2:
-            st.title("🔐 Είσοδος στο ERP")
-            st.markdown("Παρακαλώ συνδεθείτε για να συνεχίσετε.")
+            st.title("🔐 SalesTree ERP Login")
+            st.markdown("Παρακαλώ συνδεθείτε.")
             
             username = st.text_input("Όνομα Χρήστη")
             password = st.text_input("Κωδικός Πρόσβασης", type="password")
             
-            if st.button("Σύνδεση"):
+            if st.button("Είσοδος"):
                 if username in users and users[username] == password:
                     st.session_state.logged_in = True
                     st.session_state.username = username
                     st.success("Επιτυχής σύνδεση!")
                     st.rerun()
                 else:
-                    st.error("Λάθος όνομα χρήστη ή κωδικός.")
-        
-        st.stop() # Σταματάει τον κώδικα εδώ αν δεν έχει γίνει login
+                    st.error("Λάθος στοιχεία.")
+        st.stop()
 
-# Καλουμε τη συνάρτηση login πριν από οτιδήποτε άλλο
 check_login()
 
 # --- 3. ΦΟΡΤΩΣΗ ΔΕΔΟΜΕΝΩΝ ---
@@ -74,7 +69,6 @@ def load_data(file_path):
     try:
         df = pd.read_excel(file_path, sheet_name="Journal", engine='openpyxl')
         
-        # Καθαρισμός
         df['DocDate'] = pd.to_datetime(df['DocDate'], errors='coerce')
         df['Payment Date'] = pd.to_datetime(df['Payment Date'], errors='coerce')
         
@@ -92,7 +86,6 @@ def load_data(file_path):
     except Exception as e:
         return None
 
-# --- Φόρτωση State ---
 path = get_excel_path()
 if path:
     if 'df' not in st.session_state:
@@ -107,55 +100,42 @@ else:
     st.stop()
 
 df = st.session_state.df
-if df is None:
-    st.error("Σφάλμα στο αρχείο.")
-    st.stop()
 
 # --- 4. SIDEBAR & ΦΙΛΤΡΑ ---
 st.sidebar.title("🏢 SalesTree ERP")
-st.sidebar.write(f"👤 Χρήστης: **{st.session_state.username}**")
-if st.sidebar.button("Αποσύνδεση"):
+st.sidebar.info(f"👤 **{st.session_state.username}**")
+if st.sidebar.button("Έξοδος"):
     st.session_state.logged_in = False
     st.rerun()
 
 st.sidebar.divider()
 
-# --- ΦΙΛΤΡΟ ΗΜΕΡΟΜΗΝΙΑΣ (GLOBAL) ---
-st.sidebar.header("📅 Περίοδος Αναφοράς")
-
-# Προεπιλογή: Τρέχον έτος
+# Ημερομηνίες
+st.sidebar.header("📅 Περίοδος")
 today = date.today()
 default_start = date(today.year, 1, 1)
 default_end = date(today.year, 12, 31)
+date_range = st.sidebar.date_input("Επιλογή", value=(default_start, default_end), format="DD/MM/YYYY")
 
-date_range = st.sidebar.date_input(
-    "Επιλέξτε Ημερομηνίες (Από - Έως)",
-    value=(default_start, default_end),
-    format="DD/MM/YYYY"
-)
-
-# Εφαρμογή Φίλτρου
 if len(date_range) == 2:
     start_date, end_date = date_range
-    # Μετατροπή σε datetime για σύγκριση
     mask = (df['DocDate'].dt.date >= start_date) & (df['DocDate'].dt.date <= end_date)
     df_filtered = df[mask]
 else:
-    st.warning("Παρακαλώ επιλέξτε και ημερομηνία λήξης.")
-    df_filtered = df # Fallback
+    df_filtered = df
 
-# --- ΜΕΝΟΥ ---
-menu = st.sidebar.radio("Modules", [
+menu = st.sidebar.radio("Μενού", [
     "📊 Dashboard", 
-    "🏦 Treasury (Ταμεία & Τράπεζες)", 
-    "📝 Journal (Εγγραφές)", 
-    "⏳ Aging & Debts (Οφειλές)",
+    "🏦 Treasury", 
+    "📝 Journal", 
+    "⏳ Aging (Οφειλές)",
     "⚙️ Ρυθμίσεις"
 ])
 
 # --- 5. DASHBOARD ---
 if menu == "📊 Dashboard":
-    st.title(f"Εικόνα Περιόδου: {start_date.strftime('%d/%m/%Y')} - {end_date.strftime('%d/%m/%Y')}")
+    st.title("📊 Εικόνα Επιχείρησης")
+    st.caption(f"Περίοδος: {start_date.strftime('%d/%m/%Y')} - {end_date.strftime('%d/%m/%Y')}")
     
     col1, col2, col3, col4 = st.columns(4)
     
@@ -176,7 +156,7 @@ if menu == "📊 Dashboard":
     
     c1, c2 = st.columns([2, 1])
     with c1:
-        st.subheader("🗓️ Διαχρονική Εξέλιξη")
+        st.subheader("🗓️ Μηνιαία Κίνηση")
         if not df_filtered.empty:
             monthly = df_filtered.copy()
             monthly['Month'] = monthly['DocDate'].dt.strftime('%Y-%m')
@@ -187,7 +167,7 @@ if menu == "📊 Dashboard":
                          color_discrete_map={'Income': '#2ecc71', 'Expense': '#e74c3c'})
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("Δεν υπάρχουν δεδομένα για αυτή την περίοδο.")
+            st.info("Δεν υπάρχουν κινήσεις για αυτή την περίοδο.")
         
     with c2:
         st.subheader("🍰 Κέντρα Κόστους")
@@ -199,12 +179,12 @@ if menu == "📊 Dashboard":
             st.info("Δεν υπάρχουν έξοδα.")
 
 # --- 6. TREASURY ---
-elif menu == "🏦 Treasury (Ταμεία & Τράπεζες)":
+elif menu == "🏦 Treasury":
     st.title("🏦 Διαχείριση Ρευστότητας")
     tab1, tab2, tab3 = st.tabs(["💰 Υπόλοιπα", "📈 Κίνηση", "➕ Νέα Τράπεζα"])
     
     with tab1:
-        st.write("*(Τα υπόλοιπα υπολογίζονται διαχρονικά, όχι μόνο για την επιλεγμένη περίοδο)*")
+        st.write("*(Συνολικά υπόλοιπα μέχρι σήμερα)*")
         df_paid = df[df['Status'] == 'Paid'].copy()
         df_paid['SignedAmount'] = df_paid.apply(lambda x: x['Amount (Gross)'] if x['DocType'] == 'Income' else -x['Amount (Gross)'], axis=1)
         
@@ -222,13 +202,12 @@ elif menu == "🏦 Treasury (Ταμεία & Τράπεζες)":
     with tab2:
         if 'bank_list' in st.session_state and st.session_state.bank_list:
             selected_bank = st.selectbox("Επιλογή Λογαριασμού", st.session_state.bank_list)
-            # Εδώ εφαρμόζουμε το φίλτρο ημερομηνίας ΜΟΝΟ για την προβολή των κινήσεων
             bank_txns = df_filtered[(df_filtered['Bank Account'] == selected_bank) & (df_filtered['Status']=='Paid')].sort_values('DocDate')
             
             if not bank_txns.empty:
                 st.dataframe(bank_txns[['DocDate', 'Description', 'Amount (Gross)', 'DocType']], use_container_width=True)
             else:
-                st.warning(f"Δεν υπάρχουν κινήσεις για {selected_bank} σε αυτή την περίοδο.")
+                st.warning(f"Δεν υπάρχουν κινήσεις για {selected_bank}.")
         else:
             st.warning("Δεν υπάρχουν τράπεζες.")
 
@@ -241,28 +220,25 @@ elif menu == "🏦 Treasury (Ταμεία & Τράπεζες)":
                 st.success("Προστέθηκε!")
 
 # --- 7. JOURNAL ---
-elif menu == "📝 Journal (Εγγραφές)":
-    st.title("📝 Διαχείριση Συναλλαγών")
+elif menu == "📝 Journal":
+    st.title("📝 Ημερολόγιο Συναλλαγών")
     
     # Export Button
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
         st.session_state.df.to_excel(writer, sheet_name='Journal', index=False)
-    st.download_button("💾 Download Excel Backup", buffer, "Finance_Data_Backup.xlsx")
+    st.download_button("💾 Κατέβασμα Excel (Backup)", buffer, "Finance_Data_Backup.xlsx")
 
-    # Filters
     c1, c2 = st.columns(2)
     search = c1.text_input("🔍 Αναζήτηση")
     type_filter = c2.multiselect("Τύπος", df['DocType'].unique())
     
-    # Filtering Logic
-    df_view = df_filtered.copy() # Start with date filtered
+    df_view = df_filtered.copy()
     if search:
         df_view = df_view[df_view.astype(str).apply(lambda x: x.str.contains(search, case=False)).any(axis=1)]
     if type_filter:
         df_view = df_view[df_view['DocType'].isin(type_filter)]
 
-    # Editor
     banks_options = st.session_state.bank_list if 'bank_list' in st.session_state else []
     edited_df = st.data_editor(
         df_view.sort_values('DocDate', ascending=False),
@@ -279,20 +255,13 @@ elif menu == "📝 Journal (Εγγραφές)":
     )
     
     if not edited_df.equals(df_view):
-        st.warning("⚠️ Έγιναν αλλαγές. Πατήστε το Save κουμπί για να κατεβάσετε το αρχείο!")
-        # Εδώ χρειάζεται προσοχή: ενημερώνουμε το main DF με βάση τα indexes (δεν υλοποιείται πλήρως στο demo)
-        # Για απλότητα στο MVP, ενημερώνουμε το Session State χύμα, αλλά αυτό μπορεί να κάνει overwrite αν δεν προσέξουμε.
-        # Σωστή λύση: Merge changes.
+        st.warning("⚠️ Πραγματοποιείτε αλλαγές. Μην ξεχάσετε να κατεβάσετε το αρχείο!")
+        st.session_state.df.update(edited_df)
 
 # --- 8. AGING ---
-elif menu == "⏳ Aging & Debts (Οφειλές)":
+elif menu == "⏳ Aging (Οφειλές)":
     st.title("⏳ Οφειλές & Απαιτήσεις")
-    
-    # Χρησιμοποιούμε το Global Date Filter? Συνήθως το Aging είναι "As of Today".
-    # Αλλά μπορούμε να δείξουμε τι δημιουργήθηκε σε αυτή την περίοδο.
-    # Για το demo, θα δείξουμε ΟΛΑ τα ανοιχτά ανεξαρτήτως ημερομηνίας, γιατί το χρέος είναι χρέος.
-    
-    st.info("💡 Σημείωση: Εδώ εμφανίζονται ΟΛΕΣ οι ανοιχτές υποχρεώσεις μέχρι σήμερα.")
+    st.info("💡 Εμφανίζονται όλες οι ανοιχτές υποχρεώσεις ανεξαρτήτως ημερομηνίας.")
 
     unpaid_in = df[(df['DocType'] == 'Income') & (df['Status'] == 'Unpaid')]
     unpaid_out = df[(df['DocType'].isin(['Expense', 'Bill'])) & (df['Status'] == 'Unpaid')]
@@ -302,7 +271,7 @@ elif menu == "⏳ Aging & Debts (Οφειλές)":
         st.subheader("Μας Χρωστάνε (Πελάτες)")
         if not unpaid_in.empty:
             st.dataframe(unpaid_in[['DocDate', 'Counterparty', 'Amount (Gross)']], use_container_width=True)
-            st.metric("Σύνολο Απαιτήσεων", f"€{unpaid_in['Amount (Gross)'].sum():,.2f}")
+            st.metric("Σύνολο", f"€{unpaid_in['Amount (Gross)'].sum():,.2f}")
         else:
             st.success("Καμία οφειλή πελάτη.")
 
@@ -310,15 +279,37 @@ elif menu == "⏳ Aging & Debts (Οφειλές)":
         st.subheader("Χρωστάμε (Προμηθευτές)")
         if not unpaid_out.empty:
             st.dataframe(unpaid_out[['DocDate', 'Counterparty', 'Amount (Gross)']], use_container_width=True)
-            st.error(f"Σύνολο Υποχρεώσεων: €{unpaid_out['Amount (Gross)'].sum():,.2f}")
+            st.error(f"Σύνολο: €{unpaid_out['Amount (Gross)'].sum():,.2f}")
         else:
             st.success("Καμία οφειλή σε προμηθευτή.")
 
-# --- 9. SETTINGS ---
+# --- 9. ΡΥΘΜΙΣΕΙΣ (FIXED) ---
 elif menu == "⚙️ Ρυθμίσεις":
-    st.title("⚙️ Ρυθμίσεις")
-    st.write(f"Συνδεδεμένος Χρήστης: {st.session_state.username}")
-    st.write(f"Εύρος Ημερομηνιών: {start_date} έως {end_date}")
+    st.title("⚙️ Πίνακας Ελέγχου")
     
-    st.subheader("Τεχνικές Λεπτομέρειες")
-    st.json({"Records Loaded": len(df), "Banks": st.session_state.bank_list})
+    # 1. Profile Section
+    st.subheader("👤 Προφίλ Χρήστη")
+    col1, col2 = st.columns(2)
+    col1.info(f"🔑 Συνδεδεμένος ως: **{st.session_state.username}**")
+    col2.warning(f"📅 Επιλεγμένη Περίοδος: **{start_date.strftime('%d/%m/%Y')}** έως **{end_date.strftime('%d/%m/%Y')}**")
+    
+    st.divider()
+    
+    # 2. Bank List (Clean Table)
+    st.subheader("🏦 Ενεργοί Λογαριασμοί Τραπεζών")
+    st.write("Οι παρακάτω λογαριασμοί είναι διαθέσιμοι για επιλογή στις εγγραφές:")
+    
+    if 'bank_list' in st.session_state:
+        # Δείχνουμε τη λίστα σαν ωραίο πίνακα (DataFrame)
+        banks_df = pd.DataFrame(st.session_state.bank_list, columns=["Όνομα Λογαριασμού"])
+        st.dataframe(banks_df, use_container_width=True, hide_index=True)
+    else:
+        st.write("Δεν υπάρχουν καταχωρημένες τράπεζες.")
+    
+    st.divider()
+    
+    # 3. System Stats
+    st.subheader("📊 Στατιστικά Συστήματος")
+    c1, c2 = st.columns(2)
+    c1.metric("Συνολικές Εγγραφές στη Βάση", len(df))
+    c2.metric("Τελευταία Ενημέρωση", datetime.now().strftime("%H:%M"))
