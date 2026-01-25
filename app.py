@@ -8,64 +8,38 @@ from datetime import datetime, date
 
 # --- 1. CONFIG ---
 st.set_page_config(page_title="SalesTree ERP", layout="wide", page_icon="🏢")
-DB_FILE = "erp_final.db"
+DB_FILE = "erp_clean.db"
 
-# --- 2. CSS - ΚΑΘΑΡΟ DESIGN ---
+# --- 2. CSS - ΚΑΘΑΡΟ (ΧΩΡΙΣ ΧΡΩΜΑΤΙΣΤΕΣ ΠΑΡΕΜΒΑΣΕΙΣ) ---
+# Αφαιρέσαμε όλα τα background colors για να μην χαλάει το θέμα σου
 st.markdown("""
 <style>
-    .stApp { background-color: #ffffff; }
-    
-    /* Sidebar */
-    [data-testid="stSidebar"] {
-        background-color: #f0f2f6;
-        border-right: 2px solid #ccc;
+    /* Κάνουμε τα inputs να ξεχωρίζουν λίγο */
+    .stTextInput>div>div>input, .stNumberInput>div>div>input, .stSelectbox>div>div>div {
+        border: 1px solid #ccc;
     }
-    [data-testid="stSidebar"] * { color: #000000 !important; font-weight: 600; }
-
-    /* Inputs & Text */
-    h1, h2, h3, p, label, div, span { color: #000000 !important; font-family: Arial, sans-serif; }
-    .stTextInput>div>div>input, .stNumberInput>div>div>input {
-        background-color: #ffffff; color: #000000; border: 1px solid #444;
-    }
-
-    /* Metrics */
-    div[data-testid="metric-container"] {
-        background-color: #ffffff;
-        border: 2px solid #000000;
-        padding: 10px;
-        box-shadow: 3px 3px 0px rgba(0,0,0,0.2);
-    }
-
-    /* Buttons */
+    /* Κάνουμε τα κουμπιά πιο έντονα */
     .stButton>button {
-        background-color: #000000 !important;
-        color: #ffffff !important;
-        border: 1px solid #000000;
+        border: 2px solid #ccc;
         font-weight: bold;
     }
-    .stButton>button:hover { background-color: #333333 !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 3. LOGIC & CALCULATIONS ---
-# Αρχικοποίηση μεταβλητών για τους υπολογισμούς
+# --- 3. DATABASE & LOGIC ---
 if 'calc_net' not in st.session_state: st.session_state.calc_net = 0.0
 if 'calc_vat_rate' not in st.session_state: st.session_state.calc_vat_rate = 24
 if 'calc_vat_val' not in st.session_state: st.session_state.calc_vat_val = 0.0
 if 'calc_gross' not in st.session_state: st.session_state.calc_gross = 0.0
 
 def recalculate_totals():
-    """Αυτόματος υπολογισμός ΦΠΑ και Συνόλου"""
     net = st.session_state.calc_net
     rate = st.session_state.calc_vat_rate
-    
     vat_amt = net * (rate / 100)
     gross = net + vat_amt
-    
     st.session_state.calc_vat_val = round(vat_amt, 2)
     st.session_state.calc_gross = round(gross, 2)
 
-# --- 4. DATABASE ENGINE ---
 def get_conn():
     return sqlite3.connect(DB_FILE, check_same_thread=False)
 
@@ -84,18 +58,31 @@ def init_db():
         name TEXT UNIQUE, type TEXT, vat_no TEXT, phone TEXT
     )''')
     conn.commit()
+    conn.close()
+
+# Τρέχουμε τη δημιουργία πινάκων
+init_db()
+
+# --- 4. DATA CHECK & UPLOAD (Η ΛΥΣΗ ΓΙΑ ΤΙΣ 0 ΕΓΓΡΑΦΕΣ) ---
+conn = get_conn()
+row_count = conn.execute("SELECT count(*) FROM journal").fetchone()[0]
+conn.close()
+
+# ΑΝ Η ΒΑΣΗ ΕΙΝΑΙ ΑΔΕΙΑ -> ΔΕΙΧΝΟΥΜΕ ΟΘΟΝΗ ΦΟΡΤΩΣΗΣ
+if row_count == 0:
+    st.title("⚠️ Η Βάση Δεδομένων είναι Άδεια")
+    st.warning("Δεν βρέθηκαν εγγραφές. Παρακαλώ ανεβάστε το αρχείο Excel (Journal) για να ξεκινήσουμε.")
     
-    # Check if empty -> Load Excel
-    c.execute("SELECT count(*) FROM journal")
-    if c.fetchone()[0] == 0:
-        excel_files = [f for f in os.listdir() if f.endswith('.xlsx') and not f.startswith('~$')]
-        if excel_files:
-            try:
-                path = excel_files[0]
-                xl = pd.ExcelFile(path, engine='openpyxl')
+    uploaded_file = st.file_uploader("Επιλέξτε το αρχείο Excel", type=['xlsx'])
+    
+    if uploaded_file:
+        try:
+            with st.spinner("Γίνεται εισαγωγή δεδομένων..."):
+                xl = pd.ExcelFile(uploaded_file, engine='openpyxl')
                 sheet = "Journal" if "Journal" in xl.sheet_names else xl.sheet_names[0]
-                df = pd.read_excel(path, sheet_name=sheet)
+                df = pd.read_excel(uploaded_file, sheet_name=sheet)
                 
+                # Καθαρισμός Ονομάτων Στηλών
                 df.columns = df.columns.str.strip()
                 rename_map = {
                     'Date': 'DocDate', 'Ημερομηνία': 'DocDate', 
@@ -104,8 +91,13 @@ def init_db():
                 }
                 df.rename(columns=rename_map, inplace=True)
                 
+                conn = get_conn()
+                c = conn.cursor()
+                
+                count_ins = 0
                 for _, row in df.iterrows():
                     d_date = pd.to_datetime(row.get('DocDate'), errors='coerce').strftime('%Y-%m-%d')
+                    
                     c.execute('''INSERT INTO journal (
                         doc_date, doc_no, doc_type, counterparty_name, description, category,
                         amount_net, vat_amount, amount_gross, payment_method, bank_account, status
@@ -115,37 +107,47 @@ def init_db():
                      float(row.get('Amount (Net)',0)), float(row.get('VAT Amount',0)), float(row.get('Amount (Gross)',0)),
                      str(row.get('Payment Method','')), str(row.get('bank_account','')), str(row.get('Status',''))))
                     
+                    # Αυτόματη δημιουργία Πελάτη
                     p_name = str(row.get('counterparty_name','')).strip()
                     if p_name and p_name != 'nan':
                         pt = "Customer" if row.get('DocType') == 'Income' else "Supplier"
                         c.execute("INSERT OR IGNORE INTO partners (name, type) VALUES (?,?)", (p_name, pt))
+                    count_ins += 1
+                
                 conn.commit()
-            except: pass
-    conn.close()
+                conn.close()
+            st.success(f"✅ Επιτυχία! Περάστηκαν {count_ins} εγγραφές.")
+            if st.button("🚀 Είσοδος στην Εφαρμογή"):
+                st.rerun()
+                
+        except Exception as e:
+            st.error(f"Σφάλμα στο αρχείο: {e}")
+            st.stop()
+    else:
+        st.stop() # Σταματάμε εδώ αν δεν έχει ανέβει αρχείο
 
-init_db()
-
-# --- 5. AUTH ---
+# --- 5. LOGIN ---
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
 if not st.session_state.logged_in:
-    col1, col2, col3 = st.columns([1,1,1])
-    with col2:
-        st.title("🔐 Login")
-        u = st.text_input("User"); p = st.text_input("Pass", type="password")
+    st.title("🔐 SalesTree ERP Login")
+    col1, col2 = st.columns([1,2])
+    with col1:
+        u = st.text_input("User")
+        p = st.text_input("Pass", type="password")
         if st.button("Enter"):
             if (u=="admin" and p=="admin123") or (u=="user" and p=="1234"):
                 st.session_state.logged_in=True; st.session_state.username=u; st.rerun()
     st.stop()
 
-# --- 6. SIDEBAR ---
+# --- 6. MAIN APP ---
 st.sidebar.title("🚀 SalesTree ERP")
-st.sidebar.write(f"User: **{st.session_state.username}**")
+st.sidebar.write(f"👤 **{st.session_state.username}**")
 st.sidebar.divider()
 menu = st.sidebar.radio("ΜΕΝΟΥ", ["📊 Dashboard", "📝 Νέα Εγγραφή", "📇 Μητρώο", "📚 Journal", "💵 Ταμείο & Τράπεζες", "⚙️ Ρυθμίσεις"])
 
-# --- 7. DASHBOARD ---
+# --- DASHBOARD ---
 if menu == "📊 Dashboard":
-    st.title("📊 Γενική Εικόνα")
+    st.title("📊 Dashboard")
     conn = get_conn()
     df = pd.read_sql("SELECT * FROM journal", conn)
     conn.close()
@@ -171,9 +173,9 @@ if menu == "📊 Dashboard":
         fig = px.bar(grp, x='mo', y='amount_net', color='doc_type', barmode='group')
         st.plotly_chart(fig, use_container_width=True)
 
-# --- 8. VOUCHER ENTRY (AUTO CALC) ---
+# --- VOUCHER ENTRY ---
 elif menu == "📝 Νέα Εγγραφή":
-    st.title("📝 Νέα Εγγραφή (Με Αυτόματο Υπολογισμό)")
+    st.title("📝 Νέα Εγγραφή (Calculator)")
     
     conn = get_conn()
     partners = [r[0] for r in conn.execute("SELECT name FROM partners ORDER BY name").fetchall()]
@@ -191,32 +193,23 @@ elif menu == "📝 Νέα Εγγραφή":
         descr = c5.text_input("Αιτιολογία")
         
         st.divider()
-        st.subheader("💶 Οικονομικά (Αυτόματος Υπολογισμός)")
+        st.subheader("💶 Υπολογισμός Ποσών")
         
-        # --- CALCULATOR SECTION ---
+        # CALCULATOR
         kc1, kc2, kc3, kc4 = st.columns(4)
-        
-        # Input Net -> Triggers Recalculation
         net = kc1.number_input("Καθαρή Αξία (€)", step=10.0, key="calc_net", on_change=recalculate_totals)
-        
-        # Input Rate -> Triggers Recalculation
         rate = kc2.selectbox("ΦΠΑ %", [24, 13, 6, 0], key="calc_vat_rate", on_change=recalculate_totals)
-        
-        # Outputs (Displays values from Session State)
         vat = kc3.number_input("Ποσό ΦΠΑ (€)", value=st.session_state.calc_vat_val, key="calc_vat_val_input")
         gross = kc4.number_input("Σύνολο (€)", value=st.session_state.calc_gross, key="calc_gross_input")
         
-        st.caption("ℹ️ Γράψε το Καθαρό και διάλεξε ΦΠΑ%. Τα υπόλοιπα θα συμπληρωθούν αυτόματα!")
         st.divider()
-
         c9, c10 = st.columns(2)
         pay_method = c9.selectbox("Τρόπος", ["Επί Πιστώσει", "Μετρητά", "Τράπεζα"])
         bank = c10.text_input("Τράπεζα", "Alpha Bank" if pay_method=="Τράπεζα" else "Ταμείο" if pay_method=="Μετρητά" else "")
         
-        if st.button("💾 Αποθήκευση Εγγραφής", type="primary"):
-            # Final Validation
+        if st.button("💾 Αποθήκευση", type="primary"):
             if abs(gross - (net + vat)) > 0.1:
-                st.error(f"❌ Προσοχή! Τα ποσά δεν συμφωνούν: {net} + {vat} != {gross}")
+                st.error("❌ Τα ποσά δεν συμφωνούν!")
             else:
                 status = "Unpaid" if pay_method == "Επί Πιστώσει" else "Paid"
                 conn = get_conn()
@@ -225,15 +218,13 @@ elif menu == "📝 Νέα Εγγραφή":
                 conn.execute("INSERT OR IGNORE INTO partners (name, type) VALUES (?, 'Unknown')", (partner,))
                 conn.commit()
                 conn.close()
-                st.success("✅ Η εγγραφή αποθηκεύτηκε!")
-                
-                # Reset values
+                st.success("✅ Αποθηκεύτηκε!")
                 st.session_state.calc_net = 0.0
                 st.session_state.calc_vat_val = 0.0
                 st.session_state.calc_gross = 0.0
                 st.rerun()
 
-# --- 9. MASTER DATA ---
+# --- MASTER DATA ---
 elif menu == "📇 Μητρώο":
     st.title("📇 Μητρώο Συναλλασσόμενων")
     conn = get_conn()
@@ -245,37 +236,25 @@ elif menu == "📇 Μητρώο":
         st.success("Saved!")
     conn.close()
 
-# --- 10. JOURNAL & EDITING ---
+# --- JOURNAL ---
 elif menu == "📚 Journal":
     st.title("📚 Αρχείο & Διορθώσεις")
     conn = get_conn()
     df = pd.read_sql("SELECT * FROM journal ORDER BY doc_date DESC", conn)
     conn.close()
     
-    st.info("💡 Μπορείς να διορθώσεις απευθείας στον πίνακα. Το σύστημα θα ελέγξει τα ποσά πριν την αποθήκευση.")
-    
+    st.info("💡 Μπορείς να διορθώσεις απευθείας στον πίνακα.")
     edited_df = st.data_editor(df, num_rows="dynamic", use_container_width=True, hide_index=True)
     
     if st.button("💾 Ενημέρωση Βάσης"):
-        # Έλεγχος πριν την αποθήκευση
-        errors = []
-        for idx, row in edited_df.iterrows():
-            n, v, g = row['amount_net'], row['vat_amount'], row['amount_gross']
-            if abs(g - (n + v)) > 0.5: # Ανοχή 50 λεπτά
-                errors.append(f"Γραμμή {idx+1}: Net({n}) + VAT({v}) != Gross({g})")
-        
-        if errors:
-            st.error("⚠️ Βρέθηκαν λάθη στα ποσά! Διορθώστε τα πριν την αποθήκευση:")
-            for e in errors: st.write(e)
-        else:
-            conn = get_conn()
-            conn.execute("DELETE FROM journal") # Full overwrite logic for simplicity
-            edited_df.to_sql('journal', conn, if_exists='append', index=False)
-            conn.commit()
-            conn.close()
-            st.success("✅ Η βάση ενημερώθηκε επιτυχώς!")
+        conn = get_conn()
+        conn.execute("DELETE FROM journal")
+        edited_df.to_sql('journal', conn, if_exists='append', index=False)
+        conn.commit()
+        conn.close()
+        st.success("✅ Ενημερώθηκε!")
 
-# --- 11. TREASURY ---
+# --- TREASURY ---
 elif menu == "💵 Ταμείο & Τράπεζες":
     st.title("💵 Διαθέσιμα")
     conn = get_conn()
@@ -299,9 +278,9 @@ elif menu == "💵 Ταμείο & Τράπεζες":
         for i, r in gr.iterrows():
             st.info(f"**{r['bank_account']}**: €{r['signed_amount']:,.2f}")
 
-# --- 12. SETTINGS ---
+# --- SETTINGS ---
 elif menu == "⚙️ Ρυθμίσεις":
     st.title("⚙️ Ρυθμίσεις")
-    if st.button("🗑️ Hard Reset"):
+    if st.button("🗑️ Hard Reset (Διαγραφή Όλων)"):
         if os.path.exists(DB_FILE): os.remove(DB_FILE)
-        st.error("Deleted. Refresh page.")
+        st.warning("Η βάση διαγράφηκε. Κάνε Refresh τη σελίδα.")
