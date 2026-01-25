@@ -7,32 +7,79 @@ import io
 import os
 from datetime import datetime, date
 
-# --- 1. ΡΥΘΜΙΣΕΙΣ ΣΕΛΙΔΑΣ ---
+# --- 1. ΡΥΘΜΙΣΕΙΣ & ΜΟΝΤΕΡΝΟ DESIGN ---
 st.set_page_config(page_title="SalesTree ERP", layout="wide", page_icon="🏢")
 DB_FILE = "erp.db"
 
-# --- CSS (ΚΑΘΑΡΟ & ΕΥΑΝΑΓΝΩΣΤΟ) ---
+# Εδώ είναι το "Professional Theme"
 st.markdown("""
 <style>
-    .stApp { background-color: #ffffff; }
-    [data-testid="stSidebar"] { background-color: #f8f9fa; border-right: 1px solid #ddd; }
-    h1, h2, h3, p, label, div, span { color: #000000 !important; font-family: sans-serif; }
-    .stRadio label { color: #000000 !important; font-weight: 600 !important; font-size: 16px !important; }
+    /* 1. ΦΟΝΤΟ ΕΦΑΡΜΟΓΗΣ - Απαλό Γκρι */
+    .stApp {
+        background-color: #f1f5f9;
+    }
+
+    /* 2. SIDEBAR - Σκούρο Μπλε για Αντίθεση */
+    section[data-testid="stSidebar"] {
+        background-color: #0f172a;
+    }
+    /* Τα γράμματα στο Sidebar ΛΕΥΚΑ για να φαίνονται */
+    section[data-testid="stSidebar"] h1, 
+    section[data-testid="stSidebar"] h2, 
+    section[data-testid="stSidebar"] h3, 
+    section[data-testid="stSidebar"] label, 
+    section[data-testid="stSidebar"] span, 
+    section[data-testid="stSidebar"] p, 
+    section[data-testid="stSidebar"] div {
+        color: #f8fafc !important;
+    }
+
+    /* 3. ΚΥΡΙΩΣ ΚΕΙΜΕΝΟ - Σκούρο για να διαβάζεται */
+    h1, h2, h3, h4, p, li, div {
+        color: #1e293b; 
+    }
+
+    /* 4. METRICS (Κουτάκια) - Λευκά με σκιά */
     div[data-testid="metric-container"] {
-        background-color: #f0f2f6; border: 1px solid #d1d5db;
-        padding: 15px; border-radius: 8px; box-shadow: 2px 2px 5px rgba(0,0,0,0.1);
+        background-color: #ffffff;
+        padding: 15px;
+        border-radius: 10px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+        border-left: 5px solid #3b82f6; /* Μπλε γραμμή αριστερά */
     }
-    .stButton>button {
-        background-color: #2c3e50 !important; color: white !important;
-        font-weight: bold; border-radius: 5px; border: none;
+    div[data-testid="metric-container"] label {
+        color: #64748b !important; /* Γκρι τίτλος metric */
     }
-    .stButton>button:hover { background-color: #1a252f !important; }
-    .stTabs [data-baseweb="tab-list"] { gap: 5px; }
+    div[data-testid="metric-container"] div {
+        color: #0f172a !important; /* Μαύρο νούμερο */
+    }
+
+    /* 5. TABS - Καθαρό στυλ */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 5px;
+    }
     .stTabs [data-baseweb="tab"] {
-        background-color: #e2e8f0; color: #000000 !important;
-        border-radius: 4px; font-weight: bold;
+        background-color: #e2e8f0;
+        border-radius: 5px;
+        color: #334155;
+        font-weight: 600;
     }
-    .stTabs [aria-selected="true"] { background-color: #2563eb !important; color: white !important; }
+    .stTabs [aria-selected="true"] {
+        background-color: #3b82f6 !important;
+        color: white !important;
+    }
+
+    /* 6. BUTTONS */
+    .stButton>button {
+        background-color: #3b82f6;
+        color: white;
+        border-radius: 6px;
+        border: none;
+        padding: 0.5rem 1rem;
+    }
+    .stButton>button:hover {
+        background-color: #2563eb;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -178,7 +225,7 @@ if st.session_state.df.empty:
         st.rerun()
     st.stop()
 
-# Τράπεζες & Μέτοχοι
+# Τράπεζες
 existing_banks = st.session_state.df['Bank Account'].unique().tolist()
 default_banks = ['Alpha Bank', 'Eurobank', 'Piraeus', 'National Bank', 'Revolut', 'Ταμείο Μετρητών']
 st.session_state.bank_list = sorted(list(set([x for x in existing_banks + default_banks if str(x) != 'nan' and str(x) != ''])))
@@ -187,7 +234,7 @@ df = st.session_state.df
 
 # --- 5. SIDEBAR ---
 st.sidebar.title("🏢 SalesTree ERP")
-st.sidebar.info(f"👤 **{st.session_state.username}**")
+st.sidebar.markdown(f"<p style='color:white;'>👤 <b>{st.session_state.username}</b></p>", unsafe_allow_html=True)
 if st.sidebar.button("Logout"): 
     st.session_state.logged_in = False
     st.rerun()
@@ -201,7 +248,6 @@ if len(dates) == 2:
 else:
     df_filtered = df
 
-# MENU
 menu = st.sidebar.radio("Μενού", 
     ["📊 Dashboard", "👥 Μέτοχοι", "⚖️ Ισοζύγιο", "🖨️ Αναφορές", "🏦 Treasury", "📝 Journal", "⏳ Aging", "⚙️ Ρυθμίσεις"]
 )
@@ -221,183 +267,117 @@ if menu == "📊 Dashboard":
     
     st.divider()
     
-    st.subheader("🏆 Smart Analytics")
     c1, c2 = st.columns(2)
     with c1:
-        st.markdown("**Top 5 Πελάτες (Τζίρος)**")
+        st.markdown("### Top 5 Πελάτες (Τζίρος)")
         top_clients = df_filtered[df_filtered['DocType']=='Income'].groupby('Counterparty')['Amount (Net)'].sum().nlargest(5).reset_index()
         if not top_clients.empty:
             st.plotly_chart(px.bar(top_clients, x='Amount (Net)', y='Counterparty', orientation='h', color='Amount (Net)'), use_container_width=True)
         else:
             st.info("Δεν υπάρχουν πωλήσεις.")
     with c2:
-        st.markdown("**Top 5 Κατηγορίες Εξόδων**")
+        st.markdown("### Top 5 Κατηγορίες Εξόδων")
         top_exp = df_filtered[df_filtered['DocType'].isin(['Expense', 'Bill'])].groupby('Category')['Amount (Net)'].sum().nlargest(5).reset_index()
         if not top_exp.empty:
              st.plotly_chart(px.pie(top_exp, values='Amount (Net)', names='Category', hole=0.5), use_container_width=True)
         else:
             st.info("Δεν υπάρχουν έξοδα.")
 
-# --- 7. ΜΕΤΟΧΟΙ (NEW MODULE) ---
+# --- 7. ΜΕΤΟΧΟΙ ---
 elif menu == "👥 Μέτοχοι":
-    st.title("👥 Διαχείριση Μετόχων & Μερισμάτων")
-    
-    # Filter Dividends
+    st.title("👥 Διαχείριση Μετόχων")
     div_df = df_filtered[df_filtered['DocType'] == 'Equity Distribution'].copy()
     
-    tab1, tab2 = st.tabs(["💰 Διανομές & Υπόλοιπα", "➕ Καταβολή Μερίσματος"])
+    tab1, tab2 = st.tabs(["💰 Διανομές", "➕ Πληρωμή Μερίσματος"])
     
     with tab1:
         total_div = div_df['Amount (Net)'].sum()
-        st.metric("Συνολικά Μερίσματα (Τρέχουσα Περίοδος)", f"€{total_div:,.2f}")
+        st.metric("Σύνολο Μερισμάτων", f"€{total_div:,.2f}")
         
         col1, col2 = st.columns([2, 1])
         with col1:
             st.subheader("Ανάλυση ανά Μέτοχο")
             if not div_df.empty:
                 shareholder_stats = div_df.groupby('Counterparty')['Amount (Net)'].sum().reset_index()
-                shareholder_stats.columns = ['Ονοματεπώνυμο', 'Ποσό']
                 st.dataframe(shareholder_stats, use_container_width=True, hide_index=True)
             else:
-                st.info("Δεν έχουν καταβληθεί μερίσματα σε αυτή την περίοδο.")
-        
+                st.info("Δεν έχουν καταβληθεί μερίσματα.")
         with col2:
             if not div_df.empty:
-                fig = px.pie(shareholder_stats, values='Ποσό', names='Ονοματεπώνυμο', title="Κατανομή")
+                fig = px.pie(shareholder_stats, values='Amount (Net)', names='Counterparty')
                 st.plotly_chart(fig, use_container_width=True)
 
     with tab2:
-        st.subheader("Νέα Πληρωμή Μερίσματος")
+        st.subheader("Νέα Πληρωμή")
         with st.form("dividend_form"):
             col1, col2 = st.columns(2)
             d_date = col1.date_input("Ημερομηνία", value=date.today())
-            partner = col2.text_input("Ονοματεπώνυμο Μετόχου")
+            partner = col2.text_input("Μέτοχος")
+            amount = st.number_input("Ποσό (€)", min_value=0.01)
+            bank = st.selectbox("Πληρωμή Από", st.session_state.bank_list)
             
-            col3, col4 = st.columns(2)
-            amount = col3.number_input("Ποσό (€)", min_value=0.01, step=100.0)
-            bank = col4.selectbox("Πληρωμή Από", st.session_state.bank_list)
-            
-            descr = st.text_input("Περιγραφή", value="Διανομή Κερδών")
-            
-            if st.form_submit_button("💾 Καταχώρηση Πληρωμής"):
-                # Δημιουργία νέας εγγραφής στη βάση
+            if st.form_submit_button("💾 Καταχώρηση"):
                 new_row = {
-                    'DocDate': d_date,
-                    'DocType': 'Equity Distribution',
-                    'Counterparty': partner,
-                    'Description': descr,
-                    'Amount (Net)': amount,
-                    'Amount (Gross)': amount,
-                    'VAT Amount': 0,
-                    'Payment Method': 'Bank Transfer',
-                    'Bank Account': bank,
-                    'Status': 'Paid',
-                    'Category': 'Dividends',
-                    'GL Account': 8000,
-                    'Payment Date': d_date
+                    'DocDate': d_date, 'DocType': 'Equity Distribution',
+                    'Counterparty': partner, 'Description': 'Διανομή Κερδών',
+                    'Amount (Net)': amount, 'Amount (Gross)': amount, 'VAT Amount': 0,
+                    'Payment Method': 'Bank Transfer', 'Bank Account': bank, 'Status': 'Paid',
+                    'Category': 'Dividends', 'GL Account': 8000, 'Payment Date': d_date
                 }
-                # Save to DB
                 new_df = pd.DataFrame([new_row])
                 new_df['DocDate'] = pd.to_datetime(new_df['DocDate'])
                 new_df['Payment Date'] = pd.to_datetime(new_df['Payment Date'])
                 
-                # Combine and Save
                 updated_df = pd.concat([st.session_state.df, new_df], ignore_index=True)
                 save_data_to_db(updated_df)
-                st.session_state.df = updated_df # Update local state
-                st.balloons()
-                st.success("Η πληρωμή καταχωρήθηκε!")
+                st.session_state.df = updated_df
+                st.success("Καταχωρήθηκε!")
                 st.rerun()
 
 # --- 8. ΙΣΟΖΥΓΙΟ ---
 elif menu == "⚖️ Ισοζύγιο":
-    st.title("⚖️ Ισοζύγιο Λογαριασμών")
-
-    tb = df_filtered.groupby('GL Account').agg({
-        'Amount (Net)': 'sum',
-        'Amount (Gross)': 'sum'
-    }).reset_index()
-
-    tb['Περιγραφή'] = tb['GL Account'].map(GL_MAP).fillna("Άγνωστος Λογαριασμός")
-    tb = tb[['GL Account', 'Περιγραφή', 'Amount (Net)', 'Amount (Gross)']]
-    tb.columns = ['Κωδικός', 'Περιγραφή Λογαριασμού', 'Καθαρό Ποσό', 'Μικτό Ποσό']
-    tb = tb.sort_values('Κωδικός')
-
+    st.title("⚖️ Ισοζύγιο")
+    tb = df_filtered.groupby('GL Account').agg({'Amount (Net)': 'sum', 'Amount (Gross)': 'sum'}).reset_index()
+    tb['Περιγραφή'] = tb['GL Account'].map(GL_MAP).fillna("Άγνωστος")
+    tb = tb[['GL Account', 'Περιγραφή', 'Amount (Net)', 'Amount (Gross)']].sort_values('GL Account')
+    
     st.dataframe(tb, use_container_width=True, hide_index=True)
     
     buf = io.BytesIO()
-    with pd.ExcelWriter(buf, engine='xlsxwriter') as writer:
-        tb.to_excel(writer, sheet_name='Trial Balance', index=False)
-    st.download_button("🖨️ Εκτύπωση (Λήψη Excel)", buf, "Trial_Balance.xlsx", type="primary")
+    with pd.ExcelWriter(buf, engine='xlsxwriter') as writer: tb.to_excel(writer, sheet_name='Trial Balance', index=False)
+    st.download_button("🖨️ Λήψη Excel", buf, "Trial_Balance.xlsx")
 
 # --- 9. ΑΝΑΦΟΡΕΣ ---
 elif menu == "🖨️ Αναφορές":
-    st.title("🖨️ Κέντρο Αναφορών")
-    
-    tab1, tab2 = st.tabs(["🏛️ Αναφορά ΦΠΑ", "📈 Αποτελέσματα (P&L)"])
+    st.title("🖨️ Αναφορές")
+    tab1, tab2 = st.tabs(["🏛️ ΦΠΑ", "📈 P&L"])
     
     with tab1:
-        st.subheader("Περιοδική Δήλωση ΦΠΑ (Εκτίμηση)")
-        
         vat_out = df_filtered[df_filtered['DocType'] == 'Income']['VAT Amount'].sum()
         vat_in = df_filtered[df_filtered['DocType'].isin(['Expense', 'Bill'])]['VAT Amount'].sum()
-        vat_result = vat_out - vat_in
+        res = vat_out - vat_in
+        c1, c2, c3 = st.columns(3)
+        c1.metric("ΦΠΑ Πωλήσεων", f"€{vat_out:,.2f}")
+        c2.metric("ΦΠΑ Αγορών", f"€{vat_in:,.2f}")
+        c3.metric("Αποτέλεσμα", f"€{res:,.2f}")
         
-        col1, col2, col3 = st.columns(3)
-        col1.metric("ΦΠΑ Εκροών (Πωλήσεις)", f"€{vat_out:,.2f}")
-        col2.metric("ΦΠΑ Εισροών (Αγορές)", f"€{vat_in:,.2f}")
-        col3.metric("Αποτέλεσμα", f"€{vat_result:,.2f}", delta="Πληρωμή" if vat_result > 0 else "Επιστροφή", delta_color="inverse")
-        
-        st.divider()
-        st.write("**Αναλυτικές Κινήσεις ΦΠΑ:**")
-        vat_df = df_filtered[df_filtered['VAT Amount'] != 0][['DocDate', 'DocType', 'Counterparty', 'VAT Amount']]
-        st.dataframe(vat_df, use_container_width=True)
-        
-        buf_vat = io.BytesIO()
-        with pd.ExcelWriter(buf_vat, engine='xlsxwriter') as writer:
-            vat_df.to_excel(writer, sheet_name='VAT Report', index=False)
-        st.download_button("🖨️ Εκτύπωση ΦΠΑ", buf_vat, "VAT_Report.xlsx")
+        st.dataframe(df_filtered[df_filtered['VAT Amount']!=0][['DocDate','Counterparty','VAT Amount']], use_container_width=True)
 
     with tab2:
-        st.subheader("Αποτελέσματα Χρήσης (P&L)")
-        pl_data = df_filtered[df_filtered['DocType'].isin(['Income', 'Expense', 'Bill'])]
-        pl_grouped = pl_data.groupby(['DocType', 'Category'])['Amount (Net)'].sum().reset_index()
-        
-        try:
-            pl_pivot = pl_grouped.pivot(index='Category', columns='DocType', values='Amount (Net)').fillna(0)
-            st.dataframe(pl_pivot.style.highlight_max(axis=0), use_container_width=True)
-            
-            buf_pl = io.BytesIO()
-            with pd.ExcelWriter(buf_pl, engine='xlsxwriter') as writer:
-                pl_pivot.to_excel(writer, sheet_name='PnL')
-            st.download_button("🖨️ Εκτύπωση P&L", buf_pl, "PnL_Report.xlsx")
-        except:
-            st.info("Δεν υπάρχουν αρκετά δεδομένα για P&L.")
+        pl = df_filtered[df_filtered['DocType'].isin(['Income','Expense','Bill'])].groupby(['Category','DocType'])['Amount (Net)'].sum().unstack().fillna(0)
+        st.dataframe(pl, use_container_width=True)
 
 # --- 10. TREASURY ---
 elif menu == "🏦 Treasury":
-    st.title("🏦 Διαχείριση Ρευστότητας")
-    tab1, tab2, tab3 = st.tabs(["💰 Υπόλοιπα", "📈 Κίνηση", "➕ Νέα Τράπεζα"])
+    st.title("🏦 Ρευστότητα")
+    df_pd = df[df['Status'] == 'Paid'].copy()
+    df_pd['Sgn'] = df_pd.apply(lambda x: x['Amount (Gross)'] if x['DocType'] == 'Income' else -x['Amount (Gross)'], axis=1)
+    bal = df_pd.groupby('Bank Account')['Sgn'].sum().reset_index()
     
-    with tab1:
-        df_pd = df[df['Status'] == 'Paid'].copy()
-        df_pd['Sgn'] = df_pd.apply(lambda x: x['Amount (Gross)'] if x['DocType'] == 'Income' else -x['Amount (Gross)'], axis=1)
-        bal = df_pd.groupby('Bank Account')['Sgn'].sum().reset_index()
-        st.metric("Σύνολο", f"€{bal['Sgn'].sum():,.2f}")
-        cols = st.columns(3)
-        for i, r in bal.iterrows():
-            with cols[i % 3]: st.info(f"**{r['Bank Account']}**\n\n### €{r['Sgn']:,.2f}")
-
-    with tab2:
-        sel_bank = st.selectbox("Λογαριασμός", st.session_state.bank_list)
-        txns = df_filtered[(df_filtered['Bank Account'] == sel_bank) & (df_filtered['Status']=='Paid')].sort_values('DocDate', ascending=False)
-        st.dataframe(txns[['DocDate', 'Description', 'Amount (Gross)', 'DocType']], use_container_width=True)
-
-    with tab3:
-        with st.form("new_bank"):
-            nb = st.text_input("Όνομα Τράπεζας")
-            if st.form_submit_button("Προσθήκη"):
-                st.session_state.bank_list.append(nb); st.success("ΟΚ")
+    st.metric("Σύνολο", f"€{bal['Sgn'].sum():,.2f}")
+    cols = st.columns(3)
+    for i, r in bal.iterrows():
+        with cols[i%3]: st.info(f"**{r['Bank Account']}**\n\n### €{r['Sgn']:,.2f}")
 
 # --- 11. JOURNAL ---
 elif menu == "📝 Journal":
@@ -405,7 +385,7 @@ elif menu == "📝 Journal":
     
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine='xlsxwriter') as writer: st.session_state.df.to_excel(writer, sheet_name='Journal', index=False)
-    st.download_button("💾 Download Excel Backup", buf, "Finance_Backup.xlsx")
+    st.download_button("💾 Backup Excel", buf, "Finance_Backup.xlsx")
 
     c1, c2 = st.columns(2)
     s_txt = c1.text_input("Αναζήτηση")
@@ -415,8 +395,6 @@ elif menu == "📝 Journal":
     if s_txt: v = v[v.astype(str).apply(lambda x: x.str.contains(s_txt, case=False)).any(axis=1)]
     if t_flt: v = v[v['DocType'].isin(t_flt)]
 
-    gl_options = sorted(list(GL_MAP.keys()))
-
     edf = st.data_editor(v.sort_values('DocDate', ascending=False), num_rows="dynamic", use_container_width=True, hide_index=True,
         column_config={
             "DocDate": st.column_config.DateColumn("Ημ/νία"),
@@ -424,11 +402,10 @@ elif menu == "📝 Journal":
             "Bank Account": st.column_config.SelectboxColumn("Τράπεζα", options=st.session_state.bank_list),
             "DocType": st.column_config.SelectboxColumn("Τύπος", options=["Income", "Expense", "Bill", "Equity Distribution"]),
             "Status": st.column_config.SelectboxColumn("Κατάσταση", options=["Paid", "Unpaid"]),
-            "GL Account": st.column_config.SelectboxColumn("Λογαριασμός (GL)", options=gl_options, help="4000=Πωλήσεις, 6000=Έξοδα, κτλ")
+            "GL Account": st.column_config.SelectboxColumn("GL", options=sorted(list(GL_MAP.keys())))
         }
     )
     
-    st.markdown("---")
     if st.button("💾 Αποθήκευση στη Βάση", type="primary"):
         st.session_state.df.update(edf)
         new_rows = edf[~edf.index.isin(st.session_state.df.index)]
@@ -440,25 +417,17 @@ elif menu == "📝 Journal":
 # --- 12. AGING ---
 elif menu == "⏳ Aging":
     st.title("⏳ Οφειλές")
-    u_in = df[(df['DocType'] == 'Income') & (df['Status'] == 'Unpaid')]
-    u_out = df[(df['DocType'].isin(['Expense', 'Bill'])) & (df['Status'] == 'Unpaid')]
     c1, c2 = st.columns(2)
-    with c1: st.subheader("Πελάτες"); st.dataframe(u_in[['DocDate','Counterparty','Amount (Gross)']]); st.metric("Σύνολο", f"€{u_in['Amount (Gross)'].sum():,.2f}")
-    with c2: st.subheader("Προμηθευτές"); st.dataframe(u_out[['DocDate','Counterparty','Amount (Gross)']]); st.metric("Σύνολο", f"€{u_out['Amount (Gross)'].sum():,.2f}")
+    with c1: 
+        st.subheader("Πελάτες")
+        st.dataframe(df[(df['DocType']=='Income')&(df['Status']=='Unpaid')][['DocDate','Counterparty','Amount (Gross)']], use_container_width=True)
+    with c2: 
+        st.subheader("Προμηθευτές")
+        st.dataframe(df[(df['DocType'].isin(['Expense','Bill']))&(df['Status']=='Unpaid')][['DocDate','Counterparty','Amount (Gross)']], use_container_width=True)
 
 # --- 13. SETTINGS ---
 elif menu == "⚙️ Ρυθμίσεις":
     st.title("⚙️ Ρυθμίσεις")
-    st.write(f"Χρήστης: {st.session_state.username}")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("Λεξικό Λογαριασμών (GL Map)")
-        gl_df = pd.DataFrame(list(GL_MAP.items()), columns=['Κωδικός', 'Περιγραφή'])
-        st.dataframe(gl_df, hide_index=True)
-
-    with col2:
-        st.subheader("Ενέργειες")
-        if st.button("🗑️ Hard Reset (Διαγραφή Βάσης)"):
-            if os.path.exists(DB_FILE): os.remove(DB_FILE)
-            st.rerun()
+    if st.button("🗑️ Hard Reset"):
+        if os.path.exists(DB_FILE): os.remove(DB_FILE)
+        st.rerun()
