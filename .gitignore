@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Editor
+.vscode/
+
+# Local SQLite database (do not commit)
+erp_tax_fixed_v2.db
+
+# OS
+.DS_Store

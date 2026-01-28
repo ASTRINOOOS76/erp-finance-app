@@ -8,7 +8,9 @@ from datetime import datetime, date
 
 # --- 1. CONFIG ---
 st.set_page_config(page_title="SalesTree ERP Final", layout="wide", page_icon="🏢")
-DB_FILE = "erp_tax_fixed_v2.db"
+# Always resolve DB path relative to this file so Streamlit's working directory
+# (which can vary depending on how the app is launched) doesn't create/read a different DB.
+DB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "erp_tax_fixed_v2.db")
 
 # --- 2. CSS (ΧΡΩΜΑΤΑ ΚΑΙ ΤΥΠΟΓΡΑΦΙΑ) ---
 st.markdown("""
@@ -216,6 +218,124 @@ st.markdown("""
     .stDataFrame {
         border-radius: 8px !important;
     }
+
+    /* ===== PROFESSIONAL UI OVERRIDES (cleaner + more enterprise) ===== */
+    :root {
+        --st-brand: #00d084;   /* SalesTree green */
+        --st-navy: #0b2b4c;    /* deep navy */
+        --st-bg: #F7FAFC;      /* soft background */
+        --st-border: #e3e9f0;
+        --st-text: #1A202C;
+        --st-muted: #587089;
+        --st-hover: #e0fcff;
+    }
+
+    .stApp {
+        background: var(--st-bg) !important;
+    }
+
+    .main .block-container {
+        padding-top: 1.25rem !important;
+        padding-bottom: 2rem !important;
+    }
+
+    h1 {
+        color: var(--st-navy) !important;
+        font-size: 2.05rem !important;
+        letter-spacing: -0.5px !important;
+        margin-bottom: 1.0rem !important;
+    }
+
+    h2 {
+        color: var(--st-navy) !important;
+        font-size: 1.55rem !important;
+        margin-top: 1.25rem !important;
+        margin-bottom: 0.75rem !important;
+    }
+
+    h3, h4 {
+        color: var(--st-navy) !important;
+    }
+
+    div[data-testid="metric-container"] {
+        background: #ffffff !important;
+        border: 1px solid var(--st-border) !important;
+        border-radius: 12px !important;
+        box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06) !important;
+    }
+
+    div[data-testid="metric-container"] label {
+        text-transform: none !important;
+        letter-spacing: 0 !important;
+        font-size: 0.9rem !important;
+    }
+
+    /* Sidebar container */
+    [data-testid="stSidebar"] {
+        background: #ffffff !important;
+        border-right: 1px solid var(--st-border) !important;
+        box-shadow: 2px 0 18px rgba(16, 24, 40, 0.06) !important;
+    }
+
+    /* Sidebar spacing */
+    [data-testid="stSidebar"] .block-container {
+        padding-top: 1.25rem !important;
+    }
+
+    /* Sidebar menu (safe styling) */
+    [data-testid="stSidebar"] [role="radiogroup"] {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 0.35rem !important;
+    }
+
+    /* Streamlit uses BaseWeb for radios; this is more stable than :has() */
+    [data-testid="stSidebar"] label[data-baseweb="radio"] {
+        width: 100% !important;
+        margin: 0 !important;
+        padding: 0.55rem 0.7rem !important;
+        border-radius: 12px !important;
+        border: 1px solid transparent !important;
+        background: transparent !important;
+        transition: background-color 0.12s ease, border-color 0.12s ease !important;
+    }
+
+    /* Ensure sidebar menu text is always visible */
+    [data-testid="stSidebar"] label[data-baseweb="radio"] p {
+        color: var(--st-text) !important;
+        margin: 0 !important;
+    }
+
+    [data-testid="stSidebar"] label[data-baseweb="radio"]:hover {
+        background: var(--st-hover) !important;
+        border-color: rgba(0, 208, 132, 0.35) !important;
+    }
+
+    /* Highlight selected option (works without :has) */
+    [data-testid="stSidebar"] label[data-baseweb="radio"] input:checked + div {
+        background: rgba(0, 208, 132, 0.12) !important;
+        border-radius: 10px !important;
+        padding: 0.1rem 0.35rem !important;
+    }
+
+    [data-testid="stSidebar"] label[data-baseweb="radio"] input:checked + div p {
+        color: var(--st-navy) !important;
+        font-weight: 700 !important;
+    }
+
+    /* Make buttons less "playful" */
+    .stButton>button {
+        background: var(--st-brand) !important;
+        color: #072A40 !important;
+        border-radius: 10px !important;
+        box-shadow: 0 1px 2px rgba(16, 24, 40, 0.10) !important;
+    }
+
+    .stButton>button:hover {
+        background: #00b874 !important;
+        transform: none !important;
+        box-shadow: 0 2px 6px rgba(16, 24, 40, 0.16) !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -231,14 +351,25 @@ def clean_dataframe(df):
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
     
     # Replace 'nan' strings and None with empty string in text columns
-    text_cols = ['counterparty', 'description', 'payment_method', 'bank_account', 'doc_no']
+    text_cols = [
+        'counterparty',
+        'description',
+        'payment_method',
+        'bank_account',
+        'doc_no',
+        'doc_type',
+        'status',
+        'gl_code',
+    ]
     for col in text_cols:
         if col in df.columns:
             df[col] = df[col].fillna('')
-            df[col] = df[col].astype(str).replace(['nan', 'None'], '')
+            df[col] = df[col].astype(str).replace(['nan', 'None', '<NA>'], '')
+            df[col] = df[col].str.strip()
     
     # Ensure amount_gross = amount_net + vat_amount if amount_gross is 0
-    df.loc[df['amount_gross'] == 0, 'amount_gross'] = df['amount_net'] + df['vat_amount']
+    if all(col in df.columns for col in ['amount_gross', 'amount_net', 'vat_amount']):
+        df.loc[df['amount_gross'] == 0, 'amount_gross'] = df['amount_net'] + df['vat_amount']
     
     return df
 
@@ -263,6 +394,19 @@ def init_db():
         c.execute("CREATE INDEX IF NOT EXISTS idx_doc_type ON journal(doc_type)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_bank_account ON journal(bank_account)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_status ON journal(status)")
+    except:
+        pass
+
+    # Normalize legacy mixed-type values (SQLite can store any type in any column)
+    try:
+        c.execute("UPDATE journal SET doc_type = '' WHERE doc_type IS NULL")
+        mixed_doc_type = c.execute(
+            "SELECT count(*) FROM journal WHERE doc_type IS NOT NULL AND typeof(doc_type) != 'text'"
+        ).fetchone()[0]
+        if mixed_doc_type and mixed_doc_type > 0:
+            c.execute(
+                "UPDATE journal SET doc_type = CAST(doc_type AS TEXT) WHERE doc_type IS NOT NULL AND typeof(doc_type) != 'text'"
+            )
     except:
         pass
     
@@ -337,7 +481,8 @@ if count == 0:
             df.rename(columns=rename_map, inplace=True)
             conn = get_conn()
             for _, r in df.iterrows():
-                d_date = pd.to_datetime(r.get('DocDate'), errors='coerce').strftime('%Y-%m-%d')
+                parsed_date = pd.to_datetime(r.get('DocDate'), errors='coerce')
+                d_date = parsed_date.strftime('%Y-%m-%d') if pd.notna(parsed_date) else date.today().strftime('%Y-%m-%d')
                 conn.execute("INSERT INTO journal (doc_date, doc_no, doc_type, counterparty, description, gl_code, amount_net, vat_amount, amount_gross, payment_method, bank_account, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                             (d_date, str(r.get('DocNo','')), str(r.get('DocType','')), str(r.get('counterparty','')), str(r.get('Description','')), "999", float(r.get('Amount (Net)',0)), float(r.get('VAT Amount',0)), float(r.get('Amount (Gross)',0)), str(r.get('Payment Method','')), str(r.get('bank_account','')), str(r.get('Status',''))))
             conn.commit(); conn.close(); st.success("✅ OK! Refresh."); st.stop()
@@ -357,8 +502,16 @@ if not st.session_state.logged_in:
     st.stop()
 
 # --- 7. MAIN APP ---
-st.sidebar.title("🚀 SalesTree ERP")
-st.sidebar.write(f"User: **{st.session_state.username}**")
+st.sidebar.markdown(
+        """
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
+            <div style="width:10px; height:28px; background:#00d084; border-radius:6px;"></div>
+            <div style="font-size:1.25rem; font-weight:800; color:#0b2b4c; line-height:1;">SalesTree ERP</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+)
+st.sidebar.caption(f"Συνδεδεμένος χρήστης: {st.session_state.username}")
 st.sidebar.divider()
 
 menu = st.sidebar.radio("ΜΕΝΟΥ", [
@@ -529,7 +682,9 @@ elif menu == "📝 Νέα Εγγραφή":
             with col1:
                 st.session_state.calc_net = st.number_input("Καθαρό (€)", step=10.0, value=st.session_state.calc_net, min_value=0.0)
             with col2:
-                st.session_state.calc_vat_rate = st.selectbox("ΦΠΑ %", [24, 13, 6, 0], index=[24, 13, 6, 0].index(st.session_state.calc_vat_rate))
+                vat_opts = [24, 13, 6, 0]
+                vat_idx = vat_opts.index(st.session_state.calc_vat_rate) if st.session_state.calc_vat_rate in vat_opts else 0
+                st.session_state.calc_vat_rate = st.selectbox("ΦΠΑ %", vat_opts, index=vat_idx)
             
             calculate_vat()
             
@@ -556,7 +711,9 @@ elif menu == "📝 Νέα Εγγραφή":
             with col1:
                 st.session_state.calc_net = st.number_input("Καθαρό (€)", step=10.0, value=st.session_state.calc_net, min_value=0.0)
             with col2:
-                st.session_state.calc_vat_rate = st.selectbox("ΦΠΑ %", [24, 13, 6, 0], index=[24, 13, 6, 0].index(st.session_state.calc_vat_rate))
+                vat_opts = [24, 13, 6, 0]
+                vat_idx = vat_opts.index(st.session_state.calc_vat_rate) if st.session_state.calc_vat_rate in vat_opts else 0
+                st.session_state.calc_vat_rate = st.selectbox("ΦΠΑ %", vat_opts, index=vat_idx)
             
             calculate_vat()
             
@@ -583,7 +740,9 @@ elif menu == "📝 Νέα Εγγραφή":
             with col1:
                 st.session_state.calc_net = st.number_input("Καθαρό (€)", step=10.0, value=st.session_state.calc_net, min_value=0.0)
             with col2:
-                st.session_state.calc_vat_rate = st.selectbox("ΦΠΑ %", [24, 13, 6, 0], index=[24, 13, 6, 0].index(st.session_state.calc_vat_rate))
+                vat_opts = [24, 13, 6, 0]
+                vat_idx = vat_opts.index(st.session_state.calc_vat_rate) if st.session_state.calc_vat_rate in vat_opts else 0
+                st.session_state.calc_vat_rate = st.selectbox("ΦΠΑ %", vat_opts, index=vat_idx)
             
             calculate_vat()
             
@@ -674,7 +833,9 @@ elif menu == "📝 Νέα Εγγραφή":
             with col1:
                 st.session_state.calc_net = st.number_input("Καθαρό (€)", step=10.0, value=st.session_state.calc_net, min_value=0.0)
             with col2:
-                st.session_state.calc_vat_rate = st.selectbox("ΦΠΑ %", [24, 13, 6, 0], index=[24, 13, 6, 0].index(st.session_state.calc_vat_rate))
+                vat_opts = [24, 13, 6, 0]
+                vat_idx = vat_opts.index(st.session_state.calc_vat_rate) if st.session_state.calc_vat_rate in vat_opts else 0
+                st.session_state.calc_vat_rate = st.selectbox("ΦΠΑ %", vat_opts, index=vat_idx)
             
             calculate_vat()
             
@@ -718,10 +879,11 @@ elif menu == "📝 Νέα Εγγραφή":
                     
                     status = "Unpaid" if pay in ["Επί Πιστώσει"] else "Paid"
                     gl_val = gl_choice.split(" - ")[0] if gl_choice else "999"
+                    doc_date_iso = d_date.strftime('%Y-%m-%d') if hasattr(d_date, 'strftime') else str(d_date)
                     
                     conn = get_conn()
                     conn.execute("INSERT INTO journal (doc_date, doc_no, doc_type, counterparty, description, gl_code, amount_net, vat_amount, amount_gross, payment_method, bank_account, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                                (d_date, d_no, d_type, partner, descr, gl_val, net_amount, vat_amount, gross_amount, pay, bank, status))
+                                (doc_date_iso, d_no, d_type, partner, descr, gl_val, net_amount, vat_amount, gross_amount, pay, bank, status))
                     conn.commit()
                     conn.close()
                     st.success("✅ Καταχωρήθηκε με επιτυχία!")
@@ -730,11 +892,12 @@ elif menu == "📝 Νέα Εγγραφή":
                     st.session_state.calc_vat_val = 0.0
                     st.session_state.calc_gross = 0.0
                     st.session_state.calc_vat_rate = 24
-                    time.sleep(1)
+                    time.sleep(0.5)
+                    st.rerun()
                 except Exception as e:
                     st.error(f"❌ Σφάλμα κατά την αποθήκευση: {str(e)}")
 
-            st.rerun()
+            # Do not force rerun on validation/errors; otherwise messages flash and disappear.
 
 # --- VAT & TAX REPORT (FIXED LOGIC) ---
 elif menu == "📊 ΦΠΑ & Φόροι (Report)":
@@ -1060,14 +1223,26 @@ elif menu == "📚 Αρχείο & Διορθώσεις":
         search_term = st.text_input("Αναζήτηση", placeholder="Όνομα ή περιγραφή...", key="arch_search")
     
     with col4:
-        # Filter out None values before sorting
-        doc_types = sorted([t for t in df['doc_type'].unique() if t and t != 'nan' and str(t).strip()])
-        selected_type = st.multiselect("Τύπος", doc_types, 
-                                      default=doc_types, 
-                                      key="arch_type")
+        # Normalize doc types to strings to avoid mixed-type sorting (e.g. str vs float)
+        doc_type_raw = df.get('doc_type', pd.Series([], dtype=object))
+        doc_type_series = doc_type_raw.fillna("").astype(str).str.strip()
+        doc_types = sorted(
+            {
+                s
+                for s in (str(v).strip() for v in doc_type_raw.unique())
+                if s and s.casefold() not in ("nan", "none", "<na>")
+            },
+            key=str.casefold,
+        )
+        selected_type = st.multiselect(
+            "Τύπος",
+            doc_types,
+            default=doc_types,
+            key="arch_type",
+        )
     
     # Apply filters
-    mask = df['doc_type'].isin(selected_type)
+    mask = doc_type_series.isin(selected_type)
     if search_term:
         mask = mask & (
             (df['counterparty'].str.contains(search_term, case=False, na=False)) |
