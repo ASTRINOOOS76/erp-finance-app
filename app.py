@@ -50,9 +50,28 @@ with st.sidebar.expander("Debug", expanded=False):
             pass
         st.rerun()
 st.caption(f"Build: {_build_stamp()}")
-# Always resolve DB path relative to this file so Streamlit's working directory
-# (which can vary depending on how the app is launched) doesn't create/read a different DB.
-DB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "erp_tax_fixed_v2.db")
+
+def _resolve_db_file() -> str:
+    # Allow explicit override (useful for persistent external volumes).
+    override = os.getenv("ERP_DB_PATH")
+    if override:
+        return override
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    repo_db = os.path.join(here, "erp_tax_fixed_v2.db")
+
+    # Streamlit Community Cloud runs the app from /mount/src/<repo>.
+    # Files under the repo directory may be replaced on redeploy; also permissions can vary.
+    # Store the DB in the home directory to avoid "stale" DB resets.
+    if os.path.abspath(__file__).startswith("/mount/src/"):
+        db_dir = os.path.join(os.path.expanduser("~"), ".erp_finance_app")
+        os.makedirs(db_dir, exist_ok=True)
+        return os.path.join(db_dir, "erp_tax_fixed_v2.db")
+
+    return repo_db
+
+
+DB_FILE = _resolve_db_file()
 
 # --- 2. CSS (ΧΡΩΜΑΤΑ ΚΑΙ ΤΥΠΟΓΡΑΦΙΑ) ---
 st.markdown("""
@@ -511,6 +530,12 @@ conn.close()
 if count == 0:
     st.title("⚠️ Εγκατάσταση")
     st.info("Η βάση είναι κενή.")
+    st.caption(f"DB file: {DB_FILE}")
+    if os.path.abspath(__file__).startswith("/mount/src/"):
+        st.warning(
+            "Streamlit Cloud: τοπική SQLite μπορεί να χαθεί σε reboot/redeploy. "
+            "Αν θέλεις μόνιμη αποθήκευση, χρειάζεται εξωτερική βάση (π.χ. Postgres/Supabase) ή να ξανακάνεις import."
+        )
     c1, c2 = st.columns(2)
     up = c1.file_uploader("Upload Excel", type=['xlsx'])
     if up:
@@ -521,14 +546,51 @@ if count == 0:
             df.columns = df.columns.str.strip()
             rename_map = {'Date':'DocDate', 'Net':'Amount (Net)', 'Gross':'Amount (Gross)', 'Type':'DocType', 'Counterparty':'counterparty', 'Bank Account':'bank_account'}
             df.rename(columns=rename_map, inplace=True)
-            conn = get_conn()
+
+            def _to_float(v):
+                try:
+                    if pd.isna(v):
+                        return 0.0
+                    return float(v)
+                except Exception:
+                    return 0.0
+
+            rows = []
             for _, r in df.iterrows():
                 parsed_date = pd.to_datetime(r.get('DocDate'), errors='coerce')
                 d_date = parsed_date.strftime('%Y-%m-%d') if pd.notna(parsed_date) else date.today().strftime('%Y-%m-%d')
-                conn.execute("INSERT INTO journal (doc_date, doc_no, doc_type, counterparty, description, gl_code, amount_net, vat_amount, amount_gross, payment_method, bank_account, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                            (d_date, str(r.get('DocNo','')), str(r.get('DocType','')), str(r.get('counterparty','')), str(r.get('Description','')), "999", float(r.get('Amount (Net)',0)), float(r.get('VAT Amount',0)), float(r.get('Amount (Gross)',0)), str(r.get('Payment Method','')), str(r.get('bank_account','')), str(r.get('Status',''))))
-            conn.commit(); conn.close(); st.success("✅ OK! Refresh."); st.stop()
-        except: st.error("Error loading Excel")
+                rows.append(
+                    (
+                        d_date,
+                        str(r.get('DocNo', '')),
+                        str(r.get('DocType', '')),
+                        str(r.get('counterparty', '')),
+                        str(r.get('Description', '')),
+                        "999",
+                        _to_float(r.get('Amount (Net)', 0)),
+                        _to_float(r.get('VAT Amount', 0)),
+                        _to_float(r.get('Amount (Gross)', 0)),
+                        str(r.get('Payment Method', '')),
+                        str(r.get('bank_account', '')),
+                        str(r.get('Status', '')),
+                    )
+                )
+
+            conn = get_conn()
+            conn.executemany(
+                "INSERT INTO journal (doc_date, doc_no, doc_type, counterparty, description, gl_code, amount_net, vat_amount, amount_gross, payment_method, bank_account, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                rows,
+            )
+            conn.commit()
+            inserted = conn.execute("SELECT count(*) FROM journal").fetchone()[0]
+            conn.close()
+
+            st.success(f"✅ Import ολοκληρώθηκε. Εγγραφές στη βάση: {inserted}")
+            st.info("Κάνε refresh ή πάτα Start Fresh αν θέλεις κενή βάση.")
+            st.stop()
+        except Exception as e:
+            st.error("❌ Error loading Excel")
+            st.exception(e)
     
     if c2.button("🚀 Start Fresh (Blank DB)"):
         conn = get_conn(); conn.execute("INSERT INTO journal (description) VALUES ('init')"); conn.execute("DELETE FROM journal"); conn.commit(); conn.close(); st.rerun()
