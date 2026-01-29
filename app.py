@@ -4,6 +4,7 @@ import sqlite3
 import plotly.express as px
 import os
 import time
+import subprocess
 from datetime import datetime, date
 
 # --- Build / Debug stamp ---
@@ -13,12 +14,41 @@ def _build_stamp() -> str:
         mtime = datetime.fromtimestamp(os.path.getmtime(__file__)).strftime("%Y-%m-%d %H:%M:%S")
     except Exception:
         mtime = "unknown"
-    return f"{mtime} | pid={os.getpid()} | {os.path.abspath(__file__)}"
+
+    commit = "unknown"
+    # Streamlit Community Cloud clones the repo; try to extract the commit hash.
+    try:
+        if os.path.isdir(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".git")):
+            commit = subprocess.check_output(
+                ["git", "rev-parse", "--short", "HEAD"],
+                cwd=os.path.dirname(os.path.abspath(__file__)),
+                stderr=subprocess.DEVNULL,
+                text=True,
+            ).strip()
+    except Exception:
+        pass
+
+    return f"{mtime} | commit={commit} | pid={os.getpid()} | {os.path.abspath(__file__)}"
 
 # --- 1. CONFIG ---
 st.set_page_config(page_title="SalesTree ERP Final", layout="wide", page_icon="🏢")
 # Show build info unobtrusively for troubleshooting "stale" instances.
 st.sidebar.caption(f"Build: {_build_stamp()}")
+with st.sidebar.expander("Debug", expanded=False):
+    if st.button("Reset session + clear cache", use_container_width=True):
+        try:
+            st.cache_data.clear()
+        except Exception:
+            pass
+        try:
+            st.cache_resource.clear()
+        except Exception:
+            pass
+        try:
+            st.session_state.clear()
+        except Exception:
+            pass
+        st.rerun()
 st.caption(f"Build: {_build_stamp()}")
 # Always resolve DB path relative to this file so Streamlit's working directory
 # (which can vary depending on how the app is launched) doesn't create/read a different DB.
