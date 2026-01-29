@@ -6,8 +6,20 @@ import os
 import time
 from datetime import datetime, date
 
+# --- Build / Debug stamp ---
+# Helps verify that the running Streamlit instance is using THIS file and that edits are being picked up.
+def _build_stamp() -> str:
+    try:
+        mtime = datetime.fromtimestamp(os.path.getmtime(__file__)).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        mtime = "unknown"
+    return f"{mtime} | pid={os.getpid()} | {os.path.abspath(__file__)}"
+
 # --- 1. CONFIG ---
 st.set_page_config(page_title="SalesTree ERP Final", layout="wide", page_icon="🏢")
+# Show build info unobtrusively for troubleshooting "stale" instances.
+st.sidebar.caption(f"Build: {_build_stamp()}")
+st.caption(f"Build: {_build_stamp()}")
 # Always resolve DB path relative to this file so Streamlit's working directory
 # (which can vary depending on how the app is launched) doesn't create/read a different DB.
 DB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "erp_tax_fixed_v2.db")
