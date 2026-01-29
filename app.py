@@ -129,6 +129,12 @@ def _safe_db_diagnostics() -> Dict[str, str]:
     }
 
 
+def _looks_like_placeholder(d: Dict[str, str]) -> bool:
+    return (d.get("host") in {"host", "HOST", "example.com", "localhost", "127.0.0.1", ""}) or (
+        d.get("db") in {"DBNAME", "dbname", "database", ""}
+    )
+
+
 DATABASE_URL = _resolve_database_url()
 if DATABASE_URL:
     DATABASE_URL = _normalize_database_url(DATABASE_URL)
@@ -622,10 +628,16 @@ try:
     init_db()
 except OperationalError:
     st.error("❌ Δεν μπορώ να συνδεθώ στη βάση Postgres (DATABASE_URL).")
-    st.write(_safe_db_diagnostics())
+    diag = _safe_db_diagnostics()
+    st.write(diag)
+    if _looks_like_placeholder(diag):
+        st.warning(
+            "Φαίνεται ότι έβαλες placeholder τιμές (π.χ. `host` / `DBNAME`) αντί για πραγματικό Supabase connection string."
+        )
     st.info(
-        "Για Supabase συνήθως χρειάζεται `sslmode=require` και σωστό host/port. "
-        "Αν έχεις IP restrictions στο Supabase, βάλε allowlist ή χρησιμοποίησε τον 'Transaction pooler' connection string."
+        "Για να το φτιάξεις: Supabase → Project Settings → Database → Connection string → επέλεξε 'Transaction pooler' και κάνε copy το URI. "
+        "Μετά στο Streamlit Cloud: Manage app → Settings → Secrets βάλε `DATABASE_URL = \"...\"` και κάνε Reboot. "
+        "Οδηγός: SUPABASE_SETUP.md"
     )
     st.stop()
 except Exception as e:
