@@ -447,6 +447,16 @@ st.markdown("""
         padding-top: 1.25rem !important;
     }
 
+    /* Reduce extra whitespace around sidebar radio widget */
+    [data-testid="stSidebar"] [data-testid="stRadio"] {
+        margin-top: 0.2rem !important;
+        padding-top: 0 !important;
+    }
+
+    [data-testid="stSidebar"] [data-testid="stRadio"] > div {
+        gap: 0.35rem !important;
+    }
+
     /* Sidebar menu (safe styling) */
     [data-testid="stSidebar"] [role="radiogroup"] {
         display: flex !important;
@@ -465,6 +475,11 @@ st.markdown("""
         transition: background-color 0.12s ease, border-color 0.12s ease !important;
     }
 
+    /* Make the inner radio container full-width */
+    [data-testid="stSidebar"] label[data-baseweb="radio"] > div {
+        width: 100% !important;
+    }
+
     /* Ensure sidebar menu text is always visible */
     [data-testid="stSidebar"] label[data-baseweb="radio"] p {
         color: var(--st-text) !important;
@@ -480,7 +495,7 @@ st.markdown("""
     [data-testid="stSidebar"] label[data-baseweb="radio"] input:checked + div {
         background: rgba(0, 208, 132, 0.12) !important;
         border-radius: 10px !important;
-        padding: 0.1rem 0.35rem !important;
+        padding: 0.15rem 0.35rem !important;
     }
 
     [data-testid="stSidebar"] label[data-baseweb="radio"] input:checked + div p {
@@ -787,6 +802,8 @@ st.sidebar.markdown(
 st.sidebar.caption(f"Συνδεδεμένος χρήστης: {st.session_state.username}")
 st.sidebar.divider()
 
+st.sidebar.markdown("<div style='font-weight:700; color:#0b2b4c; margin:0.25rem 0 0.5rem 0;'>Μενού</div>", unsafe_allow_html=True)
+
 menu = st.sidebar.radio("ΜΕΝΟΥ", [
     "📊 Dashboard",
     "📝 Νέα Εγγραφή",
@@ -795,7 +812,7 @@ menu = st.sidebar.radio("ΜΕΝΟΥ", [
     "📚 Αρχείο & Διορθώσεις",
     "💵 Ταμείο & Τράπεζες",
     "⚙️ Ρυθμίσεις GL"
-])
+], label_visibility="collapsed")
 
 # --- DASHBOARD ---
 if menu == "📊 Dashboard":
