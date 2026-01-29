@@ -7,7 +7,9 @@ import time
 import subprocess
 from typing import Any, Dict, Iterable, Optional
 from datetime import datetime, date
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import OperationalError
 
 
 # --- Build / Debug stamp ---
@@ -89,7 +91,47 @@ def _resolve_database_url() -> Optional[str]:
     return v.strip() if v else None
 
 
+def _normalize_database_url(url: str) -> str:
+    u = url.strip()
+    if not u:
+        return u
+
+    # SQLAlchemy prefers postgresql:// over postgres://
+    if u.startswith("postgres://"):
+        u = "postgresql://" + u[len("postgres://"):]
+
+    parsed = urlparse(u)
+    if parsed.scheme not in ("postgresql", "postgres"):  # allow only postgres here
+        return u
+
+    # Supabase typically requires SSL. If sslmode not specified, default may fail.
+    qs = parse_qs(parsed.query)
+    if "sslmode" not in qs:
+        qs["sslmode"] = ["require"]
+    query = urlencode(qs, doseq=True)
+
+    return urlunparse(
+        (parsed.scheme, parsed.netloc, parsed.path, parsed.params, query, parsed.fragment)
+    )
+
+
+def _safe_db_diagnostics() -> Dict[str, str]:
+    if DB_DIALECT != "postgres" or not DATABASE_URL:
+        return {"dialect": DB_DIALECT}
+    parsed = urlparse(DATABASE_URL)
+    qs = parse_qs(parsed.query)
+    return {
+        "dialect": DB_DIALECT,
+        "host": parsed.hostname or "",
+        "port": str(parsed.port or ""),
+        "db": (parsed.path or "").lstrip("/"),
+        "sslmode": (qs.get("sslmode", [""])[0] or ""),
+    }
+
+
 DATABASE_URL = _resolve_database_url()
+if DATABASE_URL:
+    DATABASE_URL = _normalize_database_url(DATABASE_URL)
 DB_DIALECT = "sqlite"
 if DATABASE_URL and DATABASE_URL.startswith(("postgres://", "postgresql://")):
     DB_DIALECT = "postgres"
@@ -576,7 +618,21 @@ def init_db():
             # Ignore duplicates
             pass
 
-init_db()
+try:
+    init_db()
+except OperationalError:
+    st.error("❌ Δεν μπορώ να συνδεθώ στη βάση Postgres (DATABASE_URL).")
+    st.write(_safe_db_diagnostics())
+    st.info(
+        "Για Supabase συνήθως χρειάζεται `sslmode=require` και σωστό host/port. "
+        "Αν έχεις IP restrictions στο Supabase, βάλε allowlist ή χρησιμοποίησε τον 'Transaction pooler' connection string."
+    )
+    st.stop()
+except Exception as e:
+    st.error("❌ Σφάλμα αρχικοποίησης βάσης.")
+    st.write(_safe_db_diagnostics())
+    st.write(f"Type: {type(e).__name__}")
+    st.stop()
 
 # --- 4. CALCULATOR LOGIC ---
 if 'calc_net' not in st.session_state: st.session_state.calc_net = 0.0
