@@ -447,83 +447,28 @@ st.markdown("""
         padding-top: 1.25rem !important;
     }
 
-    /* Reduce extra whitespace around sidebar radio widget */
+    /* Sidebar radio menu: keep styling minimal & stable across Streamlit versions */
     [data-testid="stSidebar"] [data-testid="stRadio"] {
-        margin-top: 0.2rem !important;
+        margin-top: 0.25rem !important;
         padding-top: 0 !important;
     }
 
-    [data-testid="stSidebar"] [data-testid="stRadio"] > div {
-        gap: 0.35rem !important;
-    }
-
-    /* Sidebar menu (safe styling) */
     [data-testid="stSidebar"] [role="radiogroup"] {
-        display: flex !important;
-        flex-direction: column !important;
-        gap: 0.35rem !important;
+        width: 100% !important;
     }
 
-    /* Streamlit uses BaseWeb for radios; this is more stable than :has() */
-    [data-testid="stSidebar"] label[data-baseweb="radio"] {
+    [data-testid="stSidebar"] [role="radiogroup"] label {
         width: 100% !important;
+        display: block !important;
         margin: 0 !important;
-        padding: 0.55rem 0.7rem !important;
-        border-radius: 12px !important;
-        border: 1px solid transparent !important;
-        background: transparent !important;
-        transition: background-color 0.12s ease, border-color 0.12s ease !important;
-        box-sizing: border-box !important;
     }
 
-    /* BaseWeb radio internal layout: make it a single full-width row */
-    [data-testid="stSidebar"] label[data-baseweb="radio"] input + div {
-        display: flex !important;
-        align-items: center !important;
-        width: 100% !important;
-        gap: 0.6rem !important;
-        box-sizing: border-box !important;
-        min-width: 0 !important;
-    }
-
-    /* Hide the default radio dot (the black circles) to avoid ugly spacing */
-    [data-testid="stSidebar"] label[data-baseweb="radio"] input + div > div:first-child {
-        display: none !important;
-    }
-
-    /* Ensure the label text container can use available width */
-    [data-testid="stSidebar"] label[data-baseweb="radio"] input + div > div:last-child {
-        flex: 1 1 auto !important;
-        min-width: 0 !important;
-    }
-
-    /* Ensure sidebar menu text is always visible */
-    [data-testid="stSidebar"] label[data-baseweb="radio"] p {
-        color: var(--st-text) !important;
+    [data-testid="stSidebar"] [role="radiogroup"] label p {
         margin: 0 !important;
         white-space: normal !important;
-        overflow-wrap: normal !important;
-        word-break: normal !important;
+        word-break: keep-all !important;
+        overflow-wrap: anywhere !important;
         line-height: 1.25 !important;
-    }
-
-    [data-testid="stSidebar"] label[data-baseweb="radio"]:hover {
-        background: var(--st-hover) !important;
-        border-color: rgba(0, 208, 132, 0.35) !important;
-    }
-
-    /* Highlight selected option (works without :has) */
-    [data-testid="stSidebar"] label[data-baseweb="radio"] input:checked + div {
-        width: 100% !important;
-        background: rgba(0, 208, 132, 0.12) !important;
-        border-radius: 10px !important;
-        padding: 0.35rem 0.45rem !important;
-        box-sizing: border-box !important;
-    }
-
-    [data-testid="stSidebar"] label[data-baseweb="radio"] input:checked + div p {
-        color: var(--st-navy) !important;
-        font-weight: 700 !important;
     }
 
     /* Make buttons less "playful" */
