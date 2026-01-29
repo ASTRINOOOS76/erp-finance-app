@@ -37,24 +37,27 @@ def _build_stamp() -> str:
 
 # --- 1. CONFIG ---
 st.set_page_config(page_title="SalesTree ERP Final", layout="wide", page_icon="🏢")
-# Show build info unobtrusively for troubleshooting "stale" instances.
-st.sidebar.caption(f"Build: {_build_stamp()}")
-with st.sidebar.expander("Debug", expanded=False):
-    if st.button("Reset session + clear cache", use_container_width=True):
-        try:
-            st.cache_data.clear()
-        except Exception:
-            pass
-        try:
-            st.cache_resource.clear()
-        except Exception:
-            pass
-        try:
-            st.session_state.clear()
-        except Exception:
-            pass
-        st.rerun()
-st.caption(f"Build: {_build_stamp()}")
+
+# Optional diagnostics (disabled by default)
+SHOW_DEBUG = os.getenv("ERP_SHOW_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
+if SHOW_DEBUG:
+    st.sidebar.caption(f"Build: {_build_stamp()}")
+    with st.sidebar.expander("Debug", expanded=False):
+        if st.button("Reset session + clear cache", use_container_width=True):
+            try:
+                st.cache_data.clear()
+            except Exception:
+                pass
+            try:
+                st.cache_resource.clear()
+            except Exception:
+                pass
+            try:
+                st.session_state.clear()
+            except Exception:
+                pass
+            st.rerun()
+    st.caption(f"Build: {_build_stamp()}")
 
 def _resolve_db_file() -> str:
     # Allow explicit override (useful for persistent external volumes).
