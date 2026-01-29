@@ -5,7 +5,10 @@ import plotly.express as px
 import os
 import time
 import subprocess
+from typing import Any, Dict, Iterable, Optional
 from datetime import datetime, date
+from sqlalchemy import create_engine, text
+
 
 # --- Build / Debug stamp ---
 # Helps verify that the running Streamlit instance is using THIS file and that edits are being picked up.
@@ -72,6 +75,59 @@ def _resolve_db_file() -> str:
 
 
 DB_FILE = _resolve_db_file()
+
+
+def _resolve_database_url() -> Optional[str]:
+    # Prefer Streamlit secrets when available.
+    try:
+        if hasattr(st, "secrets") and "DATABASE_URL" in st.secrets:
+            v = str(st.secrets["DATABASE_URL"]).strip()
+            return v or None
+    except Exception:
+        pass
+    v = os.getenv("DATABASE_URL")
+    return v.strip() if v else None
+
+
+DATABASE_URL = _resolve_database_url()
+DB_DIALECT = "sqlite"
+if DATABASE_URL and DATABASE_URL.startswith(("postgres://", "postgresql://")):
+    DB_DIALECT = "postgres"
+
+
+def _build_engine():
+    if DB_DIALECT == "postgres":
+        # Supabase provides a Postgres URL.
+        return create_engine(DATABASE_URL, pool_pre_ping=True)
+    # SQLite (local/dev). Use SQLAlchemy so code paths match Postgres.
+    return create_engine(
+        f"sqlite+pysqlite:///{DB_FILE}",
+        connect_args={"check_same_thread": False},
+        pool_pre_ping=True,
+    )
+
+
+ENGINE = _build_engine()
+
+
+def db_execute(sql: str, params: Optional[Dict[str, Any]] = None) -> None:
+    with ENGINE.begin() as conn:
+        conn.execute(text(sql), params or {})
+
+
+def db_executemany(sql: str, rows: Iterable[Dict[str, Any]]) -> None:
+    with ENGINE.begin() as conn:
+        conn.execute(text(sql), list(rows))
+
+
+def db_scalar(sql: str, params: Optional[Dict[str, Any]] = None, default: Any = None) -> Any:
+    try:
+        with ENGINE.connect() as conn:
+            res = conn.execute(text(sql), params or {})
+            v = res.scalar()
+            return default if v is None else v
+    except Exception:
+        return default
 
 # --- 2. CSS (ΧΡΩΜΑΤΑ ΚΑΙ ΤΥΠΟΓΡΑΦΙΑ) ---
 st.markdown("""
@@ -401,8 +457,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- 3. DATABASE SETUP ---
-def get_conn():
-    return sqlite3.connect(DB_FILE, check_same_thread=False)
+# NOTE: The app now uses SQLAlchemy Engine (ENGINE) so it can run on SQLite locally
+# and on a persistent Postgres (e.g., Supabase) in Streamlit Cloud.
 
 def clean_dataframe(df):
     """Καθαρίζει τα δεδομένα - αντικαθιστά NaN με 0 για numeric columns"""
@@ -435,49 +491,90 @@ def clean_dataframe(df):
     return df
 
 def init_db():
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS journal (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        doc_date DATE, doc_no TEXT, doc_type TEXT,
-        counterparty TEXT, description TEXT, gl_code TEXT,
-        amount_net REAL, vat_amount REAL, amount_gross REAL,
-        payment_method TEXT, bank_account TEXT, status TEXT
-    )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS gl_codes (
-        code TEXT PRIMARY KEY, description TEXT
-    )''')
+    if DB_DIALECT == "postgres":
+        db_execute(
+            """CREATE TABLE IF NOT EXISTS journal (
+                id SERIAL PRIMARY KEY,
+                doc_date DATE,
+                doc_no TEXT,
+                doc_type TEXT,
+                counterparty TEXT,
+                description TEXT,
+                gl_code TEXT,
+                amount_net DOUBLE PRECISION,
+                vat_amount DOUBLE PRECISION,
+                amount_gross DOUBLE PRECISION,
+                payment_method TEXT,
+                bank_account TEXT,
+                status TEXT
+            )"""
+        )
+        db_execute(
+            """CREATE TABLE IF NOT EXISTS gl_codes (
+                code TEXT PRIMARY KEY,
+                description TEXT
+            )"""
+        )
+    else:
+        db_execute(
+            """CREATE TABLE IF NOT EXISTS journal (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                doc_date DATE, doc_no TEXT, doc_type TEXT,
+                counterparty TEXT, description TEXT, gl_code TEXT,
+                amount_net REAL, vat_amount REAL, amount_gross REAL,
+                payment_method TEXT, bank_account TEXT, status TEXT
+            )"""
+        )
+        db_execute(
+            """CREATE TABLE IF NOT EXISTS gl_codes (
+                code TEXT PRIMARY KEY, description TEXT
+            )"""
+        )
     
     # Create indices for common queries
-    try:
-        c.execute("CREATE INDEX IF NOT EXISTS idx_doc_date ON journal(doc_date)")
-        c.execute("CREATE INDEX IF NOT EXISTS idx_counterparty ON journal(counterparty)")
-        c.execute("CREATE INDEX IF NOT EXISTS idx_doc_type ON journal(doc_type)")
-        c.execute("CREATE INDEX IF NOT EXISTS idx_bank_account ON journal(bank_account)")
-        c.execute("CREATE INDEX IF NOT EXISTS idx_status ON journal(status)")
-    except:
-        pass
+    for stmt in [
+        "CREATE INDEX IF NOT EXISTS idx_doc_date ON journal(doc_date)",
+        "CREATE INDEX IF NOT EXISTS idx_counterparty ON journal(counterparty)",
+        "CREATE INDEX IF NOT EXISTS idx_doc_type ON journal(doc_type)",
+        "CREATE INDEX IF NOT EXISTS idx_bank_account ON journal(bank_account)",
+        "CREATE INDEX IF NOT EXISTS idx_status ON journal(status)",
+    ]:
+        try:
+            db_execute(stmt)
+        except Exception:
+            pass
 
-    # Normalize legacy mixed-type values (SQLite can store any type in any column)
-    try:
-        c.execute("UPDATE journal SET doc_type = '' WHERE doc_type IS NULL")
-        mixed_doc_type = c.execute(
-            "SELECT count(*) FROM journal WHERE doc_type IS NOT NULL AND typeof(doc_type) != 'text'"
-        ).fetchone()[0]
-        if mixed_doc_type and mixed_doc_type > 0:
-            c.execute(
-                "UPDATE journal SET doc_type = CAST(doc_type AS TEXT) WHERE doc_type IS NOT NULL AND typeof(doc_type) != 'text'"
+    # Normalize legacy mixed-type values (SQLite-only; Postgres enforces types)
+    if DB_DIALECT == "sqlite":
+        try:
+            db_execute("UPDATE journal SET doc_type = '' WHERE doc_type IS NULL")
+            mixed_doc_type = db_scalar(
+                "SELECT count(*) FROM journal WHERE doc_type IS NOT NULL AND typeof(doc_type) != 'text'",
+                default=0,
             )
-    except:
-        pass
-    
-    try:
-        if c.execute("SELECT count(*) FROM gl_codes").fetchone()[0] == 0:
-            defaults = [("100", "Πωλήσεις"), ("200", "Αγορές"), ("300", "Ταμείο"), ("400", "Τράπεζες"), ("600", "Γενικά Έξοδα")]
-            c.executemany("INSERT INTO gl_codes VALUES (?,?)", defaults)
-            conn.commit()
-    except: pass
-    conn.commit(); conn.close()
+            if mixed_doc_type and mixed_doc_type > 0:
+                db_execute(
+                    "UPDATE journal SET doc_type = CAST(doc_type AS TEXT) WHERE doc_type IS NOT NULL AND typeof(doc_type) != 'text'"
+                )
+        except Exception:
+            pass
+
+    defaults = [
+        {"code": "100", "description": "Πωλήσεις"},
+        {"code": "200", "description": "Αγορές"},
+        {"code": "300", "description": "Ταμείο"},
+        {"code": "400", "description": "Τράπεζες"},
+        {"code": "600", "description": "Γενικά Έξοδα"},
+    ]
+    for row in defaults:
+        try:
+            db_execute(
+                "INSERT INTO gl_codes (code, description) VALUES (:code, :description)",
+                row,
+            )
+        except Exception:
+            # Ignore duplicates
+            pass
 
 init_db()
 
@@ -522,20 +619,20 @@ def validate_transaction_input(trans_data):
     return errors
 
 # --- 5. INITIAL DATA LOAD ---
-conn = get_conn()
-try: count = conn.execute("SELECT count(*) FROM journal").fetchone()[0]
-except: count = 0
-conn.close()
+count = db_scalar("SELECT count(*) FROM journal", default=0)
 
 if count == 0:
     st.title("⚠️ Εγκατάσταση")
     st.info("Η βάση είναι κενή.")
-    st.caption(f"DB file: {DB_FILE}")
-    if os.path.abspath(__file__).startswith("/mount/src/"):
-        st.warning(
-            "Streamlit Cloud: τοπική SQLite μπορεί να χαθεί σε reboot/redeploy. "
-            "Αν θέλεις μόνιμη αποθήκευση, χρειάζεται εξωτερική βάση (π.χ. Postgres/Supabase) ή να ξανακάνεις import."
-        )
+    if DB_DIALECT == "postgres":
+        st.caption("DB: Postgres (DATABASE_URL)")
+    else:
+        st.caption(f"DB file: {DB_FILE}")
+        if os.path.abspath(__file__).startswith("/mount/src/"):
+            st.warning(
+                "Streamlit Cloud: τοπική SQLite μπορεί να χαθεί σε reboot/redeploy. "
+                "Για 100% μόνιμη αποθήκευση βάλε Postgres/Supabase (DATABASE_URL)."
+            )
     c1, c2 = st.columns(2)
     up = c1.file_uploader("Upload Excel", type=['xlsx'])
     if up:
@@ -560,30 +657,33 @@ if count == 0:
                 parsed_date = pd.to_datetime(r.get('DocDate'), errors='coerce')
                 d_date = parsed_date.strftime('%Y-%m-%d') if pd.notna(parsed_date) else date.today().strftime('%Y-%m-%d')
                 rows.append(
-                    (
-                        d_date,
-                        str(r.get('DocNo', '')),
-                        str(r.get('DocType', '')),
-                        str(r.get('counterparty', '')),
-                        str(r.get('Description', '')),
-                        "999",
-                        _to_float(r.get('Amount (Net)', 0)),
-                        _to_float(r.get('VAT Amount', 0)),
-                        _to_float(r.get('Amount (Gross)', 0)),
-                        str(r.get('Payment Method', '')),
-                        str(r.get('bank_account', '')),
-                        str(r.get('Status', '')),
-                    )
+                    {
+                        "doc_date": d_date,
+                        "doc_no": str(r.get('DocNo', '')),
+                        "doc_type": str(r.get('DocType', '')),
+                        "counterparty": str(r.get('counterparty', '')),
+                        "description": str(r.get('Description', '')),
+                        "gl_code": "999",
+                        "amount_net": _to_float(r.get('Amount (Net)', 0)),
+                        "vat_amount": _to_float(r.get('VAT Amount', 0)),
+                        "amount_gross": _to_float(r.get('Amount (Gross)', 0)),
+                        "payment_method": str(r.get('Payment Method', '')),
+                        "bank_account": str(r.get('bank_account', '')),
+                        "status": str(r.get('Status', '')),
+                    }
                 )
 
-            conn = get_conn()
-            conn.executemany(
-                "INSERT INTO journal (doc_date, doc_no, doc_type, counterparty, description, gl_code, amount_net, vat_amount, amount_gross, payment_method, bank_account, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            db_executemany(
+                """INSERT INTO journal (
+                        doc_date, doc_no, doc_type, counterparty, description, gl_code,
+                        amount_net, vat_amount, amount_gross, payment_method, bank_account, status
+                    ) VALUES (
+                        :doc_date, :doc_no, :doc_type, :counterparty, :description, :gl_code,
+                        :amount_net, :vat_amount, :amount_gross, :payment_method, :bank_account, :status
+                    )""",
                 rows,
             )
-            conn.commit()
-            inserted = conn.execute("SELECT count(*) FROM journal").fetchone()[0]
-            conn.close()
+            inserted = db_scalar("SELECT count(*) FROM journal", default=0)
 
             st.success(f"✅ Import ολοκληρώθηκε. Εγγραφές στη βάση: {inserted}")
             st.info("Κάνε refresh ή πάτα Start Fresh αν θέλεις κενή βάση.")
@@ -593,7 +693,8 @@ if count == 0:
             st.exception(e)
     
     if c2.button("🚀 Start Fresh (Blank DB)"):
-        conn = get_conn(); conn.execute("INSERT INTO journal (description) VALUES ('init')"); conn.execute("DELETE FROM journal"); conn.commit(); conn.close(); st.rerun()
+        db_execute("DELETE FROM journal")
+        st.rerun()
     st.stop()
 
 # --- 6. AUTH ---
@@ -631,9 +732,7 @@ menu = st.sidebar.radio("ΜΕΝΟΥ", [
 # --- DASHBOARD ---
 if menu == "📊 Dashboard":
     st.title("📊 Γενική Εικόνα")
-    conn = get_conn()
-    df = pd.read_sql("SELECT * FROM journal", conn)
-    conn.close()
+    df = pd.read_sql_query("SELECT * FROM journal", ENGINE)
     
     df['doc_date'] = pd.to_datetime(df['doc_date'], errors='coerce')
     cy = datetime.now().year
@@ -739,10 +838,8 @@ if menu == "📊 Dashboard":
 # --- NEW ENTRY ---
 elif menu == "📝 Νέα Εγγραφή":
     st.title("📝 Νέα Εγγραφή - Συναλλαγές Λογιστηρίου")
-    
-    conn = get_conn()
-    gl_df = pd.read_sql("SELECT code, description FROM gl_codes ORDER BY code", conn)
-    conn.close()
+
+    gl_df = pd.read_sql_query("SELECT code, description FROM gl_codes ORDER BY code", ENGINE)
     gl_list = gl_df.apply(lambda x: f"{x['code']} - {x['description']}", axis=1).tolist()
     
     # Initialize VAT calculator state for this section
@@ -984,12 +1081,30 @@ elif menu == "📝 Νέα Εγγραφή":
                     status = "Unpaid" if pay in ["Επί Πιστώσει"] else "Paid"
                     gl_val = gl_choice.split(" - ")[0] if gl_choice else "999"
                     doc_date_iso = d_date.strftime('%Y-%m-%d') if hasattr(d_date, 'strftime') else str(d_date)
-                    
-                    conn = get_conn()
-                    conn.execute("INSERT INTO journal (doc_date, doc_no, doc_type, counterparty, description, gl_code, amount_net, vat_amount, amount_gross, payment_method, bank_account, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                                (doc_date_iso, d_no, d_type, partner, descr, gl_val, net_amount, vat_amount, gross_amount, pay, bank, status))
-                    conn.commit()
-                    conn.close()
+
+                    db_execute(
+                        """INSERT INTO journal (
+                                doc_date, doc_no, doc_type, counterparty, description, gl_code,
+                                amount_net, vat_amount, amount_gross, payment_method, bank_account, status
+                            ) VALUES (
+                                :doc_date, :doc_no, :doc_type, :counterparty, :description, :gl_code,
+                                :amount_net, :vat_amount, :amount_gross, :payment_method, :bank_account, :status
+                            )""",
+                        {
+                            "doc_date": doc_date_iso,
+                            "doc_no": d_no,
+                            "doc_type": d_type,
+                            "counterparty": partner,
+                            "description": descr,
+                            "gl_code": gl_val,
+                            "amount_net": net_amount,
+                            "vat_amount": vat_amount,
+                            "amount_gross": gross_amount,
+                            "payment_method": pay,
+                            "bank_account": bank,
+                            "status": status,
+                        },
+                    )
                     st.success("✅ Καταχωρήθηκε με επιτυχία!")
                     # Reset values
                     st.session_state.calc_net = 0.0
@@ -1006,10 +1121,8 @@ elif menu == "📝 Νέα Εγγραφή":
 # --- VAT & TAX REPORT (FIXED LOGIC) ---
 elif menu == "📊 ΦΠΑ & Φόροι (Report)":
     st.title("📊 Αναλυτική Έκθεση ΦΠΑ & Φόρων")
-    
-    conn = get_conn()
-    df = pd.read_sql("SELECT * FROM journal", conn)
-    conn.close()
+
+    df = pd.read_sql_query("SELECT * FROM journal", ENGINE)
     
     # Convert date to datetime and clean data
     df['doc_date'] = pd.to_datetime(df['doc_date'], errors='coerce')
@@ -1170,11 +1283,13 @@ elif menu == "📊 ΦΠΑ & Φόροι (Report)":
 # --- LEDGERS ---
 elif menu == "📇 Καρτέλες (Ledgers)":
     st.title("📇 Καρτέλες Συναλλασσομένων")
-    
-    conn = get_conn()
-    partners = pd.read_sql("SELECT DISTINCT counterparty FROM journal WHERE counterparty IS NOT NULL AND counterparty != ''", conn)['counterparty'].tolist()
+
+    partners_df = pd.read_sql_query(
+        "SELECT DISTINCT counterparty FROM journal WHERE counterparty IS NOT NULL AND counterparty != ''",
+        ENGINE,
+    )
+    partners = partners_df['counterparty'].tolist()
     partners.sort()
-    conn.close()
     
     if not partners:
         st.warning("⚠️ Δεν υπάρχουν καταχωρημένοι συναλλασσόμενοι")
@@ -1185,9 +1300,11 @@ elif menu == "📇 Καρτέλες (Ledgers)":
     sel = st.selectbox("Επιλογή Συναλλασσόμενου", partners, help="Επιλέξτε τον συναλλασσόμενο για να δείτε τις συναλλαγές του")
     
     if sel:
-        conn = get_conn()
-        df = pd.read_sql("SELECT * FROM journal WHERE counterparty=? ORDER BY doc_date DESC", conn, params=(sel,))
-        conn.close()
+        df = pd.read_sql_query(
+            "SELECT * FROM journal WHERE counterparty = :counterparty ORDER BY doc_date DESC",
+            ENGINE,
+            params={"counterparty": sel},
+        )
         
         # Convert date and clean data
         df['doc_date'] = pd.to_datetime(df['doc_date'], errors='coerce')
@@ -1294,10 +1411,8 @@ elif menu == "📇 Καρτέλες (Ledgers)":
 # --- ARCHIVE ---
 elif menu == "📚 Αρχείο & Διορθώσεις":
     st.title("📚 Αρχείο & Διορθώσεις")
-    
-    conn = get_conn()
-    df = pd.read_sql("SELECT rowid as id, * FROM journal ORDER BY doc_date DESC", conn)
-    conn.close()
+
+    df = pd.read_sql_query("SELECT id, * FROM journal ORDER BY doc_date DESC", ENGINE)
     
     if df.empty:
         st.info("📭 Δεν υπάρχουν καταχωρήσεις στο αρχείο")
@@ -1394,10 +1509,7 @@ elif menu == "📚 Αρχείο & Διορθώσεις":
                             st.rerun()
                     with col_del:
                         if st.button("🗑️ Διαγραφή", key=f"list_del_{rid}", use_container_width=True):
-                            conn = get_conn()
-                            conn.execute("DELETE FROM journal WHERE rowid=?", (rid,))
-                            conn.commit()
-                            conn.close()
+                            db_execute("DELETE FROM journal WHERE id = :id", {"id": rid})
                             st.success("Διαγράφηκε!")
                             time.sleep(0.3)
                             st.rerun()
@@ -1487,14 +1599,33 @@ elif menu == "📚 Αρχείο & Διορθώσεις":
                                     st.error(f"❌ {error}")
                             else:
                                 try:
-                                    conn = get_conn()
-                                    conn.execute("""UPDATE journal SET doc_date=?, doc_no=?, doc_type=?, counterparty=?, 
-                                                  description=?, amount_net=?, vat_amount=?, amount_gross=?, 
-                                                  payment_method=?, status=? WHERE rowid=?""",
-                                               (new_date, new_docno, new_type, new_partner, new_descr,
-                                                new_net, new_vat, new_gross, new_pay, new_stat, rid))
-                                    conn.commit()
-                                    conn.close()
+                                    db_execute(
+                                        """UPDATE journal SET
+                                                doc_date = :doc_date,
+                                                doc_no = :doc_no,
+                                                doc_type = :doc_type,
+                                                counterparty = :counterparty,
+                                                description = :description,
+                                                amount_net = :amount_net,
+                                                vat_amount = :vat_amount,
+                                                amount_gross = :amount_gross,
+                                                payment_method = :payment_method,
+                                                status = :status
+                                            WHERE id = :id""",
+                                        {
+                                            "doc_date": new_date.strftime('%Y-%m-%d') if hasattr(new_date, 'strftime') else str(new_date),
+                                            "doc_no": new_docno,
+                                            "doc_type": new_type,
+                                            "counterparty": new_partner,
+                                            "description": new_descr,
+                                            "amount_net": float(new_net),
+                                            "vat_amount": float(new_vat),
+                                            "amount_gross": float(new_gross),
+                                            "payment_method": new_pay,
+                                            "status": new_stat,
+                                            "id": rid,
+                                        },
+                                    )
                                     st.success("✓ Ενημερώθηκε!")
                                     time.sleep(0.3)
                                     st.rerun()
@@ -1503,10 +1634,7 @@ elif menu == "📚 Αρχείο & Διορθώσεις":
                     with col_del:
                         if st.button("Διαγραφή", key=f"det_del_{rid}", use_container_width=True, type="secondary"):
                             try:
-                                conn = get_conn()
-                                conn.execute("DELETE FROM journal WHERE rowid=?", (rid,))
-                                conn.commit()
-                                conn.close()
+                                db_execute("DELETE FROM journal WHERE id = :id", {"id": rid})
                                 st.error("✗ Διαγράφηκε!")
                                 time.sleep(0.3)
                                 st.rerun()
@@ -1516,10 +1644,8 @@ elif menu == "📚 Αρχείο & Διορθώσεις":
 # --- TREASURY ---
 elif menu == "💵 Ταμείο & Τράπεζες":
     st.title("💵 Διαχείριση Διαθεσίμων")
-    
-    conn = get_conn()
-    df_all = pd.read_sql("SELECT * FROM journal", conn)
-    conn.close()
+
+    df_all = pd.read_sql_query("SELECT * FROM journal", ENGINE)
     
     df_all['doc_date'] = pd.to_datetime(df_all['doc_date'], errors='coerce')
     df_all = clean_dataframe(df_all)
@@ -1698,7 +1824,6 @@ elif menu == "💵 Ταμείο & Τράπεζες":
 elif menu == "⚙️ Ρυθμίσεις GL":
     st.title("⚙️ Διαχείριση Ρυθμίσεων")
     
-    conn = get_conn()
     
     # Create tabs for different settings
     tab_gl, tab_customers, tab_suppliers, tab_banks, tab_system = st.tabs([
@@ -1714,7 +1839,7 @@ elif menu == "⚙️ Ρυθμίσεις GL":
         st.subheader("📚 Λογαριασμοί GL (Γενικό Καθολικό)")
         
         # Load GL codes
-        df_gl = pd.read_sql("SELECT * FROM gl_codes ORDER BY code", conn)
+        df_gl = pd.read_sql_query("SELECT * FROM gl_codes ORDER BY code", ENGINE)
         df_gl['code'] = df_gl['code'].astype(str)
         
         # Show current GL codes
@@ -1728,10 +1853,20 @@ elif menu == "⚙️ Ρυθμίσεις GL":
             
             if st.button("💾 Αποθήκευση GL Codes", use_container_width=True, type="primary"):
                 try:
-                    conn.execute("DELETE FROM gl_codes")
-                    for _, row in edited_gl.iterrows():
-                        conn.execute("INSERT INTO gl_codes VALUES (?,?)", (row['code'], row['description']))
-                    conn.commit()
+                    db_execute("DELETE FROM gl_codes")
+                    rows = [
+                        {
+                            "code": str(r.get('code', '')).strip(),
+                            "description": str(r.get('description', '')).strip(),
+                        }
+                        for _, r in edited_gl.iterrows()
+                        if str(r.get('code', '')).strip()
+                    ]
+                    if rows:
+                        db_executemany(
+                            "INSERT INTO gl_codes (code, description) VALUES (:code, :description)",
+                            rows,
+                        )
                     st.success("✓ GL Codes αποθηκεύτηκαν!")
                     time.sleep(0.5)
                     st.rerun()
@@ -1746,8 +1881,10 @@ elif menu == "⚙️ Ρυθμίσεις GL":
             if st.button("➕ Προσθήκη GL", use_container_width=True):
                 if new_code and new_desc:
                     try:
-                        conn.execute("INSERT INTO gl_codes VALUES (?,?)", (new_code, new_desc))
-                        conn.commit()
+                        db_execute(
+                            "INSERT INTO gl_codes (code, description) VALUES (:code, :description)",
+                            {"code": str(new_code).strip(), "description": str(new_desc).strip()},
+                        )
                         st.success("✓ Προστέθηκε!")
                         time.sleep(0.3)
                         st.rerun()
@@ -1761,7 +1898,10 @@ elif menu == "⚙️ Ρυθμίσεις GL":
         st.subheader("👥 Διαχείριση Πελατών")
         
         # Get unique customers from journal
-        df_journal = pd.read_sql("SELECT DISTINCT counterparty FROM journal WHERE doc_type IN ('Income', 'Cash Deposit') AND counterparty != ''", conn)
+        df_journal = pd.read_sql_query(
+            "SELECT DISTINCT counterparty FROM journal WHERE doc_type IN ('Income', 'Cash Deposit') AND counterparty != ''",
+            ENGINE,
+        )
         customers = sorted(df_journal['counterparty'].unique().tolist()) if not df_journal.empty else []
         
         st.write(f"**Σύνολο Πελατών:** {len(customers)}")
@@ -1784,11 +1924,18 @@ elif menu == "⚙️ Ρυθμίσεις GL":
                 if customer_name:
                     try:
                         # Add a test entry to register the customer
-                        conn.execute(
-                            "INSERT INTO journal (doc_date, counterparty, description, amount_net, amount_gross, status) VALUES (?, ?, ?, ?, ?, ?)",
-                            (datetime.now().strftime('%Y-%m-%d'), customer_name, "(αρχικοποίηση)", 0.0, 0.0, "Paid")
+                        db_execute(
+                            """INSERT INTO journal (doc_date, counterparty, description, amount_net, amount_gross, status)
+                               VALUES (:doc_date, :counterparty, :description, :amount_net, :amount_gross, :status)""",
+                            {
+                                "doc_date": datetime.now().strftime('%Y-%m-%d'),
+                                "counterparty": customer_name,
+                                "description": "(αρχικοποίηση)",
+                                "amount_net": 0.0,
+                                "amount_gross": 0.0,
+                                "status": "Paid",
+                            },
                         )
-                        conn.commit()
                         st.success(f"✓ Πελάτης '{customer_name}' προστέθηκε!")
                         time.sleep(0.3)
                         st.rerun()
@@ -1802,7 +1949,10 @@ elif menu == "⚙️ Ρυθμίσεις GL":
         st.subheader("🏭 Διαχείριση Προμηθευτών")
         
         # Get unique suppliers from journal
-        df_journal = pd.read_sql("SELECT DISTINCT counterparty FROM journal WHERE doc_type IN ('Expense', 'Bill') AND counterparty != ''", conn)
+        df_journal = pd.read_sql_query(
+            "SELECT DISTINCT counterparty FROM journal WHERE doc_type IN ('Expense', 'Bill') AND counterparty != ''",
+            ENGINE,
+        )
         suppliers = sorted(df_journal['counterparty'].unique().tolist()) if not df_journal.empty else []
         
         st.write(f"**Σύνολο Προμηθευτών:** {len(suppliers)}")
@@ -1825,11 +1975,18 @@ elif menu == "⚙️ Ρυθμίσεις GL":
                 if supplier_name:
                     try:
                         # Add a test entry to register the supplier
-                        conn.execute(
-                            "INSERT INTO journal (doc_date, counterparty, description, amount_net, amount_gross, status) VALUES (?, ?, ?, ?, ?, ?)",
-                            (datetime.now().strftime('%Y-%m-%d'), supplier_name, "(αρχικοποίηση)", 0.0, 0.0, "Paid")
+                        db_execute(
+                            """INSERT INTO journal (doc_date, counterparty, description, amount_net, amount_gross, status)
+                               VALUES (:doc_date, :counterparty, :description, :amount_net, :amount_gross, :status)""",
+                            {
+                                "doc_date": datetime.now().strftime('%Y-%m-%d'),
+                                "counterparty": supplier_name,
+                                "description": "(αρχικοποίηση)",
+                                "amount_net": 0.0,
+                                "amount_gross": 0.0,
+                                "status": "Paid",
+                            },
                         )
-                        conn.commit()
                         st.success(f"✓ Προμηθευτής '{supplier_name}' προστέθηκε!")
                         time.sleep(0.3)
                         st.rerun()
@@ -1843,7 +2000,10 @@ elif menu == "⚙️ Ρυθμίσεις GL":
         st.subheader("🏦 Διαχείριση Τραπεζικών Λογαριασμών")
         
         # Get unique bank accounts
-        df_journal = pd.read_sql("SELECT DISTINCT bank_account FROM journal WHERE bank_account != '' AND bank_account IS NOT NULL", conn)
+        df_journal = pd.read_sql_query(
+            "SELECT DISTINCT bank_account FROM journal WHERE bank_account != '' AND bank_account IS NOT NULL",
+            ENGINE,
+        )
         accounts = sorted(df_journal['bank_account'].unique().tolist()) if not df_journal.empty else []
         
         st.write(f"**Σύνολο Λογαριασμών:** {len(accounts)}")
@@ -1869,11 +2029,18 @@ elif menu == "⚙️ Ρυθμίσεις GL":
                     full_account = f"{account_type} - {account_name}"
                     try:
                         # Add initial entry
-                        conn.execute(
-                            "INSERT INTO journal (doc_date, bank_account, description, amount_net, amount_gross, status) VALUES (?, ?, ?, ?, ?, ?)",
-                            (datetime.now().strftime('%Y-%m-%d'), full_account, "(άνοιγμα λογαριασμού)", 0.0, 0.0, "Paid")
+                        db_execute(
+                            """INSERT INTO journal (doc_date, bank_account, description, amount_net, amount_gross, status)
+                               VALUES (:doc_date, :bank_account, :description, :amount_net, :amount_gross, :status)""",
+                            {
+                                "doc_date": datetime.now().strftime('%Y-%m-%d'),
+                                "bank_account": full_account,
+                                "description": "(άνοιγμα λογαριασμού)",
+                                "amount_net": 0.0,
+                                "amount_gross": 0.0,
+                                "status": "Paid",
+                            },
                         )
-                        conn.commit()
                         st.success(f"✓ Λογαριασμός '{full_account}' δημιουργήθηκε!")
                         time.sleep(0.3)
                         st.rerun()
@@ -1889,11 +2056,8 @@ elif menu == "⚙️ Ρυθμίσεις GL":
         st.write("**Πληροφορίες Βάσης Δεδομένων:**")
         
         # Get database statistics
-        df_all = pd.read_sql("SELECT COUNT(*) as count FROM journal", conn)
-        total_records = df_all['count'].iloc[0]
-        
-        df_gl_count = pd.read_sql("SELECT COUNT(*) as count FROM gl_codes", conn)
-        gl_count = df_gl_count['count'].iloc[0]
+        total_records = int(db_scalar("SELECT COUNT(*) FROM journal", default=0))
+        gl_count = int(db_scalar("SELECT COUNT(*) FROM gl_codes", default=0))
         
         stat1, stat2 = st.columns(2)
         stat1.metric("📝 Σύνολο Εγγραφών", f"{total_records}")
@@ -1909,10 +2073,11 @@ elif menu == "⚙️ Ρυθμίσεις GL":
         if st.button("🗑️ Διαγραφή ΌΛΩΝ των δεδομένων (Reset DB)", use_container_width=True, type="secondary"):
             if st.button("✓ Επιβεβαίωση: Διαγραφή όλων", use_container_width=True):
                 try:
-                    if os.path.exists(DB_FILE):
-                        os.remove(DB_FILE)
-                    st.error("✗ Βάση δεδομένων διαγράφηκε πλήρως!")
-                    st.info("Η εφαρμογή θα ξαναδημιουργήσει τη βάση κατά το επόμενο restart.")
+                    db_execute("DELETE FROM journal")
+                    db_execute("DELETE FROM gl_codes")
+                    init_db()
+                    st.error("✗ Η βάση καθαρίστηκε πλήρως!")
+                    st.info("Η εφαρμογή ξανα-αρχικοποίησε τα βασικά GL codes.")
                     time.sleep(2)
                     st.rerun()
                 except Exception as e:
@@ -1920,12 +2085,12 @@ elif menu == "⚙️ Ρυθμίσεις GL":
         
         st.divider()
         st.write("**Πληροφορίες Συστήματος:**")
+        db_location = "Postgres (DATABASE_URL)" if DB_DIALECT == "postgres" else DB_FILE
         st.code(f"""
-Αρχείο Βάσης: {DB_FILE}
-Τύπος Βάσης: SQLite3
+    Βάση: {db_location}
+    Τύπος Βάσης: {DB_DIALECT}
 Σύνολο Εγγραφών: {total_records}
 GL Codes: {gl_count}
 Τελευταία Ενημέρωση: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}
         """)
-    
-    conn.close()
+
