@@ -675,6 +675,144 @@ def validate_transaction_input(trans_data):
 # --- 5. INITIAL DATA LOAD ---
 count = db_scalar("SELECT count(*) FROM journal", default=0)
 
+
+def _import_excel_to_db(excel_source) -> int:
+    """Import an Excel file (path or file-like) into the journal table.
+
+    Returns the total row count in `journal` after the import.
+    """
+    xl = pd.ExcelFile(excel_source, engine="openpyxl")
+    sheet = "Journal" if "Journal" in xl.sheet_names else xl.sheet_names[0]
+    df = pd.read_excel(excel_source, sheet_name=sheet)
+    df.columns = df.columns.astype(str).str.strip()
+
+    def _to_float(v) -> float:
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return 0.0
+        if isinstance(v, (int, float)):
+            try:
+                return float(v)
+            except Exception:
+                return 0.0
+        s = str(v).strip()
+        if not s or s.lower() in {"nan", "none", "<na>"}:
+            return 0.0
+        # Normalize common currency/thousand/decimal formats (€, spaces, 1.234,56, 1,234.56)
+        s = s.replace("€", "").replace(" ", "")
+        if "," in s and "." in s:
+            # If last comma is after last dot => comma decimal
+            if s.rfind(",") > s.rfind("."):
+                s = s.replace(".", "").replace(",", ".")
+            else:
+                s = s.replace(",", "")
+        elif "," in s and "." not in s:
+            s = s.replace(",", ".")
+        try:
+            return float(s)
+        except Exception:
+            return 0.0
+
+    rows = []
+
+    # Format A: legacy/expected "Journal"-style sheet
+    # (used by older versions or user-provided exports)
+    rename_map = {
+        "Date": "DocDate",
+        "Net": "Amount (Net)",
+        "Gross": "Amount (Gross)",
+        "Type": "DocType",
+        "Counterparty": "counterparty",
+        "Bank Account": "bank_account",
+    }
+    df_journal = df.rename(columns=rename_map).copy()
+
+    # Format B: bundled finance_data.xlsx (Greek cashflow sheet, e.g. "Ταμείο")
+    is_cashflow = ("Ημερομηνία" in df.columns) and (
+        ("Έσοδα (€)" in df.columns) or ("Έξοδα (€)" in df.columns) or ("Μερίσματα" in df.columns)
+    )
+
+    if is_cashflow:
+        for _, r in df.iterrows():
+            parsed_date = pd.to_datetime(r.get("Ημερομηνία"), errors="coerce")
+            d_date = (
+                parsed_date.strftime("%Y-%m-%d")
+                if pd.notna(parsed_date)
+                else date.today().strftime("%Y-%m-%d")
+            )
+
+            income = _to_float(r.get("Έσοδα (€)", 0))
+            expense = _to_float(r.get("Έξοδα (€)", 0))
+            dividends = _to_float(r.get("Μερίσματα", 0))
+
+            amount_net = income if income else (expense if expense else dividends)
+            doc_type = "Income" if income else ("Expense" if (expense or dividends) else "")
+
+            category = str(r.get("Κατηγορία", "")).strip()
+            desc = str(r.get("Περιγραφή", "")).strip()
+            if category and desc:
+                desc = f"[{category}] {desc}"
+            elif category:
+                desc = category
+
+            rows.append(
+                {
+                    "doc_date": d_date,
+                    "doc_no": "",
+                    "doc_type": doc_type,
+                    "counterparty": str(r.get("Στέλεχος", "")).strip(),
+                    "description": desc,
+                    "gl_code": "999",
+                    "amount_net": amount_net,
+                    "vat_amount": 0.0,
+                    "amount_gross": amount_net,
+                    "payment_method": str(r.get("Τρόπος Πληρωμής", "")).strip(),
+                    "bank_account": "",
+                    "status": str(r.get("Έγκριση", "")).strip(),
+                }
+            )
+    else:
+        for _, r in df_journal.iterrows():
+            parsed_date = pd.to_datetime(r.get("DocDate"), errors="coerce")
+            d_date = (
+                parsed_date.strftime("%Y-%m-%d")
+                if pd.notna(parsed_date)
+                else date.today().strftime("%Y-%m-%d")
+            )
+            amount_net = _to_float(r.get("Amount (Net)", 0))
+            vat_amount = _to_float(r.get("VAT Amount", 0))
+            amount_gross = _to_float(r.get("Amount (Gross)", 0))
+            if amount_gross == 0.0:
+                amount_gross = amount_net + vat_amount
+
+            rows.append(
+                {
+                    "doc_date": d_date,
+                    "doc_no": str(r.get("DocNo", "")),
+                    "doc_type": str(r.get("DocType", "")),
+                    "counterparty": str(r.get("counterparty", "")),
+                    "description": str(r.get("Description", "")),
+                    "gl_code": "999",
+                    "amount_net": amount_net,
+                    "vat_amount": vat_amount,
+                    "amount_gross": amount_gross,
+                    "payment_method": str(r.get("Payment Method", "")),
+                    "bank_account": str(r.get("bank_account", "")),
+                    "status": str(r.get("Status", "")),
+                }
+            )
+
+    db_executemany(
+        """INSERT INTO journal (
+                doc_date, doc_no, doc_type, counterparty, description, gl_code,
+                amount_net, vat_amount, amount_gross, payment_method, bank_account, status
+            ) VALUES (
+                :doc_date, :doc_no, :doc_type, :counterparty, :description, :gl_code,
+                :amount_net, :vat_amount, :amount_gross, :payment_method, :bank_account, :status
+            )""",
+        rows,
+    )
+    return int(db_scalar("SELECT count(*) FROM journal", default=0) or 0)
+
 if count == 0:
     st.title("⚠️ Εγκατάσταση")
     st.info("Η βάση είναι κενή.")
@@ -688,57 +826,28 @@ if count == 0:
                 "Για 100% μόνιμη αποθήκευση βάλε Postgres/Supabase (DATABASE_URL)."
             )
     c1, c2 = st.columns(2)
-    up = c1.file_uploader("Upload Excel", type=['xlsx'])
+
+    repo_excel = os.path.join(os.path.dirname(os.path.abspath(__file__)), "finance_data.xlsx")
+    if os.path.exists(repo_excel):
+        c2.caption("📦 Βρέθηκε τοπικό αρχείο: finance_data.xlsx")
+        if c2.button("⬇️ Import bundled finance_data.xlsx", use_container_width=True):
+            try:
+                inserted = _import_excel_to_db(repo_excel)
+                st.success(f"✅ Import ολοκληρώθηκε. Εγγραφές στη βάση: {inserted}")
+                st.stop()
+            except Exception as e:
+                st.error("❌ Error loading bundled Excel")
+                st.exception(e)
+
+    up = c1.file_uploader(
+        "Upload Excel (finance_data.xlsx)",
+        type=["xlsx"],
+        help="Προτεινόμενο όνομα: finance_data.xlsx (οποιοδήποτε .xlsx γίνεται δεκτό).",
+    )
     if up:
         try:
-            xl = pd.ExcelFile(up, engine='openpyxl')
-            sheet = "Journal" if "Journal" in xl.sheet_names else xl.sheet_names[0]
-            df = pd.read_excel(up, sheet_name=sheet)
-            df.columns = df.columns.str.strip()
-            rename_map = {'Date':'DocDate', 'Net':'Amount (Net)', 'Gross':'Amount (Gross)', 'Type':'DocType', 'Counterparty':'counterparty', 'Bank Account':'bank_account'}
-            df.rename(columns=rename_map, inplace=True)
-
-            def _to_float(v):
-                try:
-                    if pd.isna(v):
-                        return 0.0
-                    return float(v)
-                except Exception:
-                    return 0.0
-
-            rows = []
-            for _, r in df.iterrows():
-                parsed_date = pd.to_datetime(r.get('DocDate'), errors='coerce')
-                d_date = parsed_date.strftime('%Y-%m-%d') if pd.notna(parsed_date) else date.today().strftime('%Y-%m-%d')
-                rows.append(
-                    {
-                        "doc_date": d_date,
-                        "doc_no": str(r.get('DocNo', '')),
-                        "doc_type": str(r.get('DocType', '')),
-                        "counterparty": str(r.get('counterparty', '')),
-                        "description": str(r.get('Description', '')),
-                        "gl_code": "999",
-                        "amount_net": _to_float(r.get('Amount (Net)', 0)),
-                        "vat_amount": _to_float(r.get('VAT Amount', 0)),
-                        "amount_gross": _to_float(r.get('Amount (Gross)', 0)),
-                        "payment_method": str(r.get('Payment Method', '')),
-                        "bank_account": str(r.get('bank_account', '')),
-                        "status": str(r.get('Status', '')),
-                    }
-                )
-
-            db_executemany(
-                """INSERT INTO journal (
-                        doc_date, doc_no, doc_type, counterparty, description, gl_code,
-                        amount_net, vat_amount, amount_gross, payment_method, bank_account, status
-                    ) VALUES (
-                        :doc_date, :doc_no, :doc_type, :counterparty, :description, :gl_code,
-                        :amount_net, :vat_amount, :amount_gross, :payment_method, :bank_account, :status
-                    )""",
-                rows,
-            )
-            inserted = db_scalar("SELECT count(*) FROM journal", default=0)
-
+            c1.caption(f"📄 Uploaded: {getattr(up, 'name', 'unknown')}")
+            inserted = _import_excel_to_db(up)
             st.success(f"✅ Import ολοκληρώθηκε. Εγγραφές στη βάση: {inserted}")
             st.info("Κάνε refresh ή πάτα Start Fresh αν θέλεις κενή βάση.")
             st.stop()
