@@ -68,6 +68,12 @@ def _resolve_db_file() -> str:
     here = os.path.dirname(os.path.abspath(__file__))
     repo_db = os.path.join(here, "erp_tax_fixed_v2.db")
 
+    # Prefer an existing DB in the user's home directory (persisted outside the repo).
+    # This is useful in containers/dev where the repo working tree might be ephemeral.
+    home_db = os.path.join(os.path.expanduser("~"), ".erp_finance_app", "erp_tax_fixed_v2.db")
+    if os.path.exists(home_db):
+        return home_db
+
     # Streamlit Community Cloud runs the app from /mount/src/<repo>.
     # Files under the repo directory may be replaced on redeploy; also permissions can vary.
     # Store the DB in the home directory to avoid "stale" DB resets.
