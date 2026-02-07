@@ -398,6 +398,11 @@ def apply_theme_css():
                     font-size: 1.5rem !important;
                 }
             }
+
+            /* Hide expander chevrons ("arrow") for cleaner UI */
+            div[data-testid="stExpander"] details summary svg {
+                display: none !important;
+            }
         </style>
         """
     else:
@@ -583,6 +588,11 @@ def apply_theme_css():
                 div[data-testid="metric-container"] [data-testid="stMetricValue"] {
                     font-size: 1.5rem !important;
                 }
+            }
+
+            /* Hide expander chevrons ("arrow") for cleaner UI */
+            div[data-testid="stExpander"] details summary svg {
+                display: none !important;
             }
         </style>
         """
@@ -1701,6 +1711,33 @@ elif menu == "Νέα Εγγραφή":
             d_type = pay
         
         st.divider()
+
+        # Clear, consistent summary before saving
+        try:
+            summary_partner = (partner or "").strip() if isinstance(partner, str) else str(partner)
+        except Exception:
+            summary_partner = ""
+        summary_partner = summary_partner or "—"
+        try:
+            summary_bank = (bank or "").strip() if isinstance(bank, str) else str(bank)
+        except Exception:
+            summary_bank = ""
+        summary_bank = summary_bank or "—"
+        summary_gl = (gl_choice or "999")
+        summary_status_gr = "✅ Πληρωμένη" if (status == "Paid") else "⏳ Εκκρεμής"
+        try:
+            summary_total = float(gross)
+        except Exception:
+            summary_total = 0.0
+        st.info(
+            f"**Σύνοψη Καταχώρησης**\n\n"
+            f"- Τύπος: **{d_type}**\n"
+            f"- Συναλλασσόμενος: **{summary_partner}**\n"
+            f"- Λογαριασμός: **{summary_bank}**\n"
+            f"- GL: **{summary_gl}**\n"
+            f"- Κατάσταση: **{summary_status_gr}**\n"
+            f"- Σύνολο: **€{summary_total:,.2f}**"
+        )
         if st.button("ΑΠΟΘΗΚΕΥΣΗ", type="primary", width='stretch'):
             # Validate input
             trans_data = {
@@ -2085,41 +2122,55 @@ elif menu == "Αρχείο & Διορθώσεις":
     
     st.subheader("📋 Όλες οι Εγγραφές")
     
-    # Advanced Filters
-    with st.expander("🔍 Προηγμένα Φίλτρα", expanded=False):
+    # Advanced Filters (toggle instead of expander to avoid chevrons)
+    show_adv = st.toggle("🔍 Προηγμένα Φίλτρα", value=False, key="arch_adv_toggle")
+    if show_adv:
         col1, col2, col3, col4 = st.columns(4)
-        
+
         with col1:
             st.markdown("**Από Ημερομηνία**")
             st.caption("Επιλέξτε την αρχική ημερομηνία για φιλτράρισμα")
-            date_from = st.date_input("Από Ημερομηνία", 
-                                    value=df['doc_date'].min().date() if not df.empty else date.today(),
-                                    key="arch_date_from")
-        
+            date_from = st.date_input(
+                "Από Ημερομηνία",
+                value=df['doc_date'].min().date() if not df.empty else date.today(),
+                key="arch_date_from",
+            )
+
         with col2:
             st.markdown("**Έως Ημερομηνία**")
             st.caption("Επιλέξτε την τελική ημερομηνία για φιλτράρισμα")
-            date_to = st.date_input("Έως Ημερομηνία", 
-                                  value=df['doc_date'].max().date() if not df.empty else date.today(),
-                                  key="arch_date_to")
-        
+            date_to = st.date_input(
+                "Έως Ημερομηνία",
+                value=df['doc_date'].max().date() if not df.empty else date.today(),
+                key="arch_date_to",
+            )
+
         with col3:
             st.markdown("**Ελάχιστο Ποσό**")
             st.caption("Εμφάνιση συναλλαγών άνω του ποσού αυτού")
-            amount_min = st.number_input("Ελάχιστο Ποσό (€)", 
-                                       min_value=0.0, 
-                                       value=0.0, 
-                                       step=10.0,
-                                       key="arch_amount_min")
-        
+            amount_min = st.number_input(
+                "Ελάχιστο Ποσό (€)",
+                min_value=0.0,
+                value=0.0,
+                step=10.0,
+                key="arch_amount_min",
+            )
+
         with col4:
             st.markdown("**Μέγιστο Ποσό**")
             st.caption("Εμφάνιση συναλλαγών κάτω του ποσού αυτού")
-            amount_max = st.number_input("Μέγιστο Ποσό (€)", 
-                                       min_value=0.0, 
-                                       value=float(df['amount_gross'].max()) if not df.empty else 10000.0, 
-                                       step=10.0,
-                                       key="arch_amount_max")
+            amount_max = st.number_input(
+                "Μέγιστο Ποσό (€)",
+                min_value=0.0,
+                value=float(df['amount_gross'].max()) if not df.empty else 10000.0,
+                step=10.0,
+                key="arch_amount_max",
+            )
+    else:
+        date_from = df['doc_date'].min().date() if not df.empty else date.today()
+        date_to = df['doc_date'].max().date() if not df.empty else date.today()
+        amount_min = 0.0
+        amount_max = float(df['amount_gross'].max()) if not df.empty else 10000.0
     
     # Basic Filters
     col1, col2, col3, col4 = st.columns(4)
@@ -2948,14 +2999,15 @@ elif menu == "Ρυθμίσεις GL":
 
         st.divider()
 
-        with st.expander("⌨️ Συντομεύσεις Πληκτρολογίου", expanded=False):
+        show_shortcuts = st.toggle("⌨️ Συντομεύσεις Πληκτρολογίου", value=False, key="sys_shortcuts_toggle")
+        if show_shortcuts:
             st.markdown("""
             **📝 Νέα Εγγραφή:**
             - `Ctrl + S`: Αποθήκευση
-            
+
             **🔍 Αναζήτηση:**
             - `Ctrl + F`: Εστίαση στο πεδίο αναζήτησης
-            
+
             **🧭 Πλοήγηση:**
             - `Alt + 1-7`: Άμεση μετάβαση στο μενού
             """)
