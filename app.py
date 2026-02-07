@@ -2121,6 +2121,13 @@ elif menu == "Αρχείο & Διορθώσεις":
     df['id'] = df['id'].astype(int)  # ΣΗΜΑΝΤΙΚΟ: Μετατροπή id σε int
     
     st.subheader("📋 Όλες οι Εγγραφές")
+
+    # Avoid writing to widget keys after instantiation.
+    # If another action requested a display-mode switch, apply it BEFORE the selectbox is created.
+    if "arch_display" not in st.session_state:
+        st.session_state["arch_display"] = "Λίστα"
+    if "arch_next_display" in st.session_state:
+        st.session_state["arch_display"] = st.session_state.pop("arch_next_display")
     
     # Advanced Filters (toggle instead of expander to avoid chevrons)
     show_adv = st.toggle("🔍 Προηγμένα Φίλτρα", value=False, key="arch_adv_toggle")
@@ -2262,7 +2269,7 @@ elif menu == "Αρχείο & Διορθώσεις":
                     col_edit, col_del, col_id = st.columns([2, 2, 1])
                     with col_edit:
                         if st.button("Επεξεργασία", key=f"list_edit_{rid}", width='stretch'):
-                            st.session_state["arch_display"] = "Λεπτομέρειες"
+                            st.session_state["arch_next_display"] = "Λεπτομέρειες"
                             st.session_state["arch_focus_id"] = rid
                             st.rerun()
                     with col_del:
