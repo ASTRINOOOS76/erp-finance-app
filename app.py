@@ -38,12 +38,16 @@ def _build_stamp() -> str:
 # --- 1. CONFIG ---
 st.set_page_config(page_title="SalesTree ERP Final", layout="wide", page_icon="🏢")
 
+# Theme management
+if 'theme' not in st.session_state:
+    st.session_state.theme = 'light'  # default to light
+
 # Optional diagnostics (disabled by default)
 SHOW_DEBUG = os.getenv("ERP_SHOW_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
 if SHOW_DEBUG:
     st.sidebar.caption(f"Build: {_build_stamp()}")
     with st.sidebar.expander("Debug", expanded=False):
-        if st.button("Reset session + clear cache", use_container_width=True):
+        if st.button("Reset session + clear cache", width='stretch'):
             try:
                 st.cache_data.clear()
             except Exception:
@@ -151,6 +155,15 @@ DB_DIALECT = "sqlite"
 if DATABASE_URL and DATABASE_URL.startswith(("postgres://", "postgresql://")):
     DB_DIALECT = "postgres"
 
+# Optional safety gate: prevent accidental writes to local SQLite when you expect Supabase.
+ERP_REQUIRE_POSTGRES = os.getenv("ERP_REQUIRE_POSTGRES", "").strip().lower() in {"1", "true", "yes", "y"}
+if ERP_REQUIRE_POSTGRES and DB_DIALECT != "postgres":
+    st.error(
+        "Απαιτείται Postgres/Supabase για μόνιμη αποθήκευση, αλλά δεν βρέθηκε έγκυρο DATABASE_URL. "
+        "Βάλε `DATABASE_URL` (Streamlit Secrets ή env var) και κάνε reboot."
+    )
+    st.stop()
+
 
 def _build_engine():
     if DB_DIALECT == "postgres":
@@ -186,315 +199,397 @@ def db_scalar(sql: str, params: Optional[Dict[str, Any]] = None, default: Any = 
     except Exception:
         return default
 
+# Theme management
+if 'theme' not in st.session_state:
+    st.session_state.theme = 'light'  # default to light
+
+def apply_theme_css():
+    if st.session_state.theme == 'dark':
+        css = """
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+            
+            * { font-family: 'Inter', 'Segoe UI', sans-serif !important; }
+            
+            .stApp { 
+                background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%) !important;
+                color: #e0e0e0 !important;
+            }
+            
+            h1 { 
+                color: #ffffff !important; 
+                font-size: 2.5rem !important;
+                font-weight: 700 !important;
+                letter-spacing: -1px !important;
+                margin-bottom: 1.5rem !important;
+            }
+            
+            h2 { 
+                color: #b0b0b0 !important; 
+                font-size: 2rem !important;
+                font-weight: 700 !important;
+                margin-top: 1.5rem !important;
+                margin-bottom: 1rem !important;
+            }
+            
+            h3, h4 { 
+                color: #c0c0c0 !important;
+                font-weight: 600 !important;
+            }
+            
+            p, span, label, li { 
+                color: #d0d0d0 !important;
+                font-size: 0.95rem !important;
+                line-height: 1.6 !important;
+            }
+            
+            [data-testid="stSidebar"] { 
+                background: linear-gradient(180deg, #2d2d2d 0%, #1a1a1a 100%) !important;
+                border-right: 2px solid #404040 !important;
+            }
+            
+            [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2 {
+                color: #ffffff !important;
+            }
+            
+            div[data-testid="metric-container"] {
+                background: linear-gradient(135deg, #3a3a3a 0%, #2d2d2d 100%) !important;
+                border: 2px solid #404040 !important;
+                padding: 15px !important;
+                border-radius: 8px !important;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.3) !important;
+            }
+            
+            div[data-testid="metric-container"] label { 
+                color: #b0b0b0 !important;
+                font-weight: 600 !important;
+                font-size: 0.85rem !important;
+                text-transform: uppercase !important;
+                letter-spacing: 0.5px !important;
+            }
+            
+            div[data-testid="metric-container"] [data-testid="stMetricValue"] { 
+                color: #ffffff !important;
+                font-weight: 700 !important;
+                font-size: 1.8rem !important;
+            }
+            
+            .stTextInput input, .stNumberInput input { 
+                background-color: #404040 !important;
+                color: #e0e0e0 !important;
+                border: 1.5px solid #606060 !important;
+                border-radius: 6px !important;
+                font-size: 0.95rem !important;
+                padding: 8px 12px !important;
+            }
+            
+            .stTextInput input:focus, .stNumberInput input:focus { 
+                border: 1.5px solid #808080 !important;
+                box-shadow: 0 0 0 3px rgba(128, 128, 128, 0.1) !important;
+            }
+            
+            .stSelectbox div { 
+                background-color: #404040 !important;
+                color: #e0e0e0 !important;
+                border: 1.5px solid #606060 !important;
+                border-radius: 6px !important;
+            }
+            
+            .stButton>button {
+                background: linear-gradient(135deg, #606060 0%, #808080 100%) !important;
+                color: #ffffff !important;
+                border: none !important;
+                border-radius: 6px !important;
+                font-weight: 600 !important;
+                font-size: 0.95rem !important;
+                padding: 10px 24px !important;
+                cursor: pointer !important;
+                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.3) !important;
+                transform: translateY(0) !important;
+            }
+            
+            .stButton>button:hover {
+                background: linear-gradient(135deg, #808080 0%, #a0a0a0 100%) !important;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.4) !important;
+                transform: translateY(-2px) scale(1.02) !important;
+            }
+            
+            .stInfo {
+                background-color: #2d4a5a !important;
+                border-left: 4px solid #606060 !important;
+            }
+            
+            .stSuccess {
+                background-color: #2d5a2d !important;
+                border-left: 4px solid #4a8a4a !important;
+                animation: successPulse 0.6s ease-out !important;
+            }
+            
+            .stWarning {
+                background-color: #5a4a2d !important;
+                border-left: 4px solid #8a7a4a !important;
+            }
+            
+            .stError {
+                background-color: #5a2d2d !important;
+                border-left: 4px solid #8a4a4a !important;
+            }
+            
+            .stDataFrame {
+                background-color: #3a3a3a !important;
+                color: #e0e0e0 !important;
+            }
+            
+            .stDataFrame th {
+                background-color: #2d2d2d !important;
+                color: #ffffff !important;
+            }
+            
+            .stDataFrame td {
+                background-color: #3a3a3a !important;
+                color: #e0e0e0 !important;
+            }
+            
+            /* Mobile Responsiveness */
+            @media (max-width: 768px) {
+                .main .block-container {
+                    padding-left: 0.5rem !important;
+                    padding-right: 0.5rem !important;
+                }
+                
+                h1 {
+                    font-size: 1.75rem !important;
+                    margin-bottom: 1rem !important;
+                }
+                
+                h2 {
+                    font-size: 1.25rem !important;
+                    margin-top: 1rem !important;
+                    margin-bottom: 0.75rem !important;
+                }
+                
+                .stButton>button {
+                    padding: 0.75rem 1rem !important;
+                    font-size: 0.9rem !important;
+                    width: 100% !important;
+                    margin-bottom: 0.5rem !important;
+                }
+                
+                .stTextInput input, .stNumberInput input, .stSelectbox div {
+                    font-size: 0.9rem !important;
+                    padding: 0.5rem !important;
+                }
+                
+                .stDataFrame {
+                    font-size: 0.8rem !important;
+                }
+                
+                .stDataFrame th, .stDataFrame td {
+                    padding: 0.5rem !important;
+                }
+                
+                div[data-testid="metric-container"] {
+                    padding: 1rem !important;
+                    margin-bottom: 1rem !important;
+                }
+                
+                div[data-testid="metric-container"] [data-testid="stMetricValue"] {
+                    font-size: 1.5rem !important;
+                }
+            }
+        </style>
+        """
+    else:
+        css = """
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+            
+            * { font-family: 'Inter', 'Segoe UI', sans-serif !important; }
+            
+            .stApp { 
+                background: linear-gradient(135deg, #f5f7fa 0%, #ffffff 100%) !important;
+            }
+            
+            h1 { 
+                color: #1a365d !important; 
+                font-size: 2.5rem !important;
+                font-weight: 700 !important;
+                letter-spacing: -1px !important;
+                margin-bottom: 1.5rem !important;
+            }
+            
+            h2 { 
+                color: #2d5a8c !important; 
+                font-size: 2rem !important;
+                font-weight: 700 !important;
+                margin-top: 1.5rem !important;
+                margin-bottom: 1rem !important;
+            }
+            
+            h3, h4 { 
+                color: #34568b !important;
+                font-weight: 600 !important;
+            }
+            
+            p, span, label, li { 
+                color: #0f172a !important;
+                font-size: 0.95rem !important;
+                line-height: 1.6 !important;
+            }
+            
+            [data-testid="stSidebar"] { 
+                background: linear-gradient(180deg, #f8f9fa 0%, #e8ecf1 100%) !important;
+                border-right: 2px solid #cbd5e0 !important;
+            }
+            
+            [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2 {
+                color: #1a365d !important;
+            }
+            
+            div[data-testid="metric-container"] {
+                background: linear-gradient(135deg, #ffffff 0%, #f0f4f8 100%) !important;
+                border: 2px solid #cbd5e0 !important;
+                padding: 15px !important;
+                border-radius: 8px !important;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.08) !important;
+            }
+            
+            div[data-testid="metric-container"] label { 
+                color: #34568b !important;
+                font-weight: 600 !important;
+                font-size: 0.85rem !important;
+                text-transform: uppercase !important;
+                letter-spacing: 0.5px !important;
+            }
+            
+            div[data-testid="metric-container"] [data-testid="stMetricValue"] { 
+                color: #1a365d !important;
+                font-weight: 700 !important;
+                font-size: 1.8rem !important;
+            }
+            
+            .stTextInput input, .stNumberInput input { 
+                background-color: #ffffff !important;
+                color: #0f172a !important;
+                border: 1.5px solid #cbd5e0 !important;
+                border-radius: 6px !important;
+                font-size: 0.95rem !important;
+                padding: 8px 12px !important;
+            }
+            
+            .stTextInput input:focus, .stNumberInput input:focus { 
+                border: 1.5px solid #2d5a8c !important;
+                box-shadow: 0 0 0 3px rgba(45, 90, 140, 0.1) !important;
+            }
+            
+            .stSelectbox div { 
+                background-color: #ffffff !important;
+                color: #0f172a !important;
+                border: 1.5px solid #cbd5e0 !important;
+                border-radius: 6px !important;
+            }
+            
+            .stButton>button {
+                background: linear-gradient(135deg, #2d5a8c 0%, #1a365d 100%) !important;
+                color: #ffffff !important;
+                border: none !important;
+                border-radius: 6px !important;
+                font-weight: 600 !important;
+                font-size: 0.95rem !important;
+                padding: 10px 24px !important;
+                cursor: pointer !important;
+                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+                box-shadow: 0 2px 8px rgba(45, 90, 140, 0.2) !important;
+                transform: translateY(0) !important;
+            }
+            
+            .stButton>button:hover {
+                background: linear-gradient(135deg, #1a365d 0%, #0f1f3c 100%) !important;
+                box-shadow: 0 4px 12px rgba(45, 90, 140, 0.3) !important;
+                transform: translateY(-2px) scale(1.02) !important;
+            }
+            
+            .stInfo {
+                background-color: #e8f4f8 !important;
+                border-left: 4px solid #2d5a8c !important;
+            }
+            
+            .stSuccess {
+                background-color: #e8f8e8 !important;
+                border-left: 4px solid #2d8a2d !important;
+                animation: successPulse 0.6s ease-out !important;
+            }
+            
+            @keyframes successPulse {
+                0% { transform: scale(1); opacity: 0; }
+                50% { transform: scale(1.05); opacity: 1; }
+                100% { transform: scale(1); opacity: 1; }
+            }
+            
+            .stWarning {
+                background-color: #fdf8e8 !important;
+                border-left: 4px solid #8a7a2d !important;
+            }
+            
+            .stError {
+                background-color: #fce8e8 !important;
+                border-left: 4px solid #8a2d2d !important;
+            }
+            
+            /* Mobile Responsiveness */
+            @media (max-width: 768px) {
+                .main .block-container {
+                    padding-left: 0.5rem !important;
+                    padding-right: 0.5rem !important;
+                }
+                
+                h1 {
+                    font-size: 1.75rem !important;
+                    margin-bottom: 1rem !important;
+                }
+                
+                h2 {
+                    font-size: 1.25rem !important;
+                    margin-top: 1rem !important;
+                    margin-bottom: 0.75rem !important;
+                }
+                
+                .stButton>button {
+                    padding: 0.75rem 1rem !important;
+                    font-size: 0.9rem !important;
+                    width: 100% !important;
+                    margin-bottom: 0.5rem !important;
+                }
+                
+                .stTextInput input, .stNumberInput input, .stSelectbox div {
+                    font-size: 0.9rem !important;
+                    padding: 0.5rem !important;
+                }
+                
+                .stDataFrame {
+                    font-size: 0.8rem !important;
+                }
+                
+                .stDataFrame th, .stDataFrame td {
+                    padding: 0.5rem !important;
+                }
+                
+                div[data-testid="metric-container"] {
+                    padding: 1rem !important;
+                    margin-bottom: 1rem !important;
+                }
+                
+                div[data-testid="metric-container"] [data-testid="stMetricValue"] {
+                    font-size: 1.5rem !important;
+                }
+            }
+        </style>
+        """
+    st.markdown(css, unsafe_allow_html=True)
+
 # --- 2. CSS (ΧΡΩΜΑΤΑ ΚΑΙ ΤΥΠΟΓΡΑΦΙΑ) ---
-st.markdown("""
-<style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-    
-    * { font-family: 'Inter', 'Segoe UI', sans-serif !important; }
-    
-    .stApp { 
-        background: linear-gradient(135deg, #f5f7fa 0%, #ffffff 100%) !important;
-    }
-    
-    h1 { 
-        color: #1a365d !important; 
-        font-size: 2.5rem !important;
-        font-weight: 700 !important;
-        letter-spacing: -1px !important;
-        margin-bottom: 1.5rem !important;
-    }
-    
-    h2 { 
-        color: #2d5a8c !important; 
-        font-size: 2rem !important;
-        font-weight: 700 !important;
-        margin-top: 1.5rem !important;
-        margin-bottom: 1rem !important;
-    }
-    
-    h3, h4 { 
-        color: #34568b !important;
-        font-weight: 600 !important;
-    }
-    
-    p, span, label, li { 
-        color: #0f172a !important;
-        font-size: 0.95rem !important;
-        line-height: 1.6 !important;
-    }
-    
-    [data-testid="stSidebar"] { 
-        background: linear-gradient(180deg, #f8f9fa 0%, #e8ecf1 100%) !important;
-        border-right: 2px solid #cbd5e0 !important;
-    }
-    
-    [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2 {
-        color: #1a365d !important;
-    }
-    
-    div[data-testid="metric-container"] {
-        background: linear-gradient(135deg, #ffffff 0%, #f0f4f8 100%) !important;
-        border: 2px solid #cbd5e0 !important;
-        padding: 15px !important;
-        border-radius: 8px !important;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.08) !important;
-    }
-    
-    div[data-testid="metric-container"] label { 
-        color: #34568b !important;
-        font-weight: 600 !important;
-        font-size: 0.85rem !important;
-        text-transform: uppercase !important;
-        letter-spacing: 0.5px !important;
-    }
-    
-    div[data-testid="metric-container"] [data-testid="stMetricValue"] { 
-        color: #1a365d !important;
-        font-weight: 700 !important;
-        font-size: 1.8rem !important;
-    }
-    
-    .stTextInput input, .stNumberInput input { 
-        background-color: #ffffff !important;
-        color: #0f172a !important;
-        border: 1.5px solid #cbd5e0 !important;
-        border-radius: 6px !important;
-        font-size: 0.95rem !important;
-        padding: 8px 12px !important;
-    }
-    
-    .stTextInput input:focus, .stNumberInput input:focus { 
-        border: 1.5px solid #2d5a8c !important;
-        box-shadow: 0 0 0 3px rgba(45, 90, 140, 0.1) !important;
-    }
-    
-    .stSelectbox div { 
-        background-color: #ffffff !important;
-        color: #0f172a !important;
-        border: 1.5px solid #cbd5e0 !important;
-        border-radius: 6px !important;
-    }
-    
-    .stButton>button {
-        background: linear-gradient(135deg, #2d5a8c 0%, #1a365d 100%) !important;
-        color: #ffffff !important;
-        border: none !important;
-        border-radius: 6px !important;
-        font-weight: 600 !important;
-        font-size: 0.95rem !important;
-        padding: 10px 24px !important;
-        cursor: pointer !important;
-        transition: all 0.3s ease !important;
-        box-shadow: 0 2px 8px rgba(45, 90, 140, 0.2) !important;
-    }
-    
-    .stButton>button:hover {
-        background: linear-gradient(135deg, #1a365d 0%, #0f1f3c 100%) !important;
-        box-shadow: 0 4px 12px rgba(45, 90, 140, 0.3) !important;
-        transform: translateY(-2px) !important;
-    }
-    
-    .stInfo {
-        background-color: #e8f4f8 !important;
-        border-left: 4px solid #2d5a8c !important;
-        color: #1a365d !important;
-        border-radius: 6px !important;
-    }
-    
-    .stWarning {
-        background-color: #fff5e6 !important;
-        border-left: 4px solid #d97706 !important;
-        color: #7c2d12 !important;
-        border-radius: 6px !important;
-    }
-    
-    .stSuccess {
-        background-color: #e8f5e9 !important;
-        border-left: 4px solid #10b981 !important;
-        color: #065f46 !important;
-        border-radius: 6px !important;
-    }
-    
-    [role="tablist"] button {
-        color: #34568b !important;
-        font-weight: 600 !important;
-        border-bottom: 2px solid #cbd5e0 !important;
-    }
-    
-    [role="tablist"] button[aria-selected="true"] {
-        color: #2d5a8c !important;
-        border-bottom: 2px solid #2d5a8c !important;
-    }
-    
-    /* ===== TABLE STYLING ===== */
-    .dataframe {
-        width: 100% !important;
-        border-collapse: collapse !important;
-        background-color: #ffffff !important;
-        border-radius: 8px !important;
-        overflow: hidden !important;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
-    }
-    
-    .dataframe thead {
-        background: linear-gradient(90deg, #1a365d 0%, #2d5a8c 100%) !important;
-    }
-    
-    .dataframe thead th {
-        color: #ffffff !important;
-        font-weight: 700 !important;
-        padding: 16px 12px !important;
-        text-align: left !important;
-        font-size: 0.9rem !important;
-        letter-spacing: 0.5px !important;
-        border-bottom: none !important;
-        text-transform: uppercase !important;
-    }
-    
-    .dataframe tbody tr {
-        border-bottom: 1px solid #e2e8f0 !important;
-        transition: background-color 0.2s ease !important;
-    }
-    
-    .dataframe tbody tr:hover {
-        background-color: #f0f4f8 !important;
-    }
-    
-    .dataframe tbody tr:last-child {
-        border-bottom: none !important;
-    }
-    
-    .dataframe tbody td {
-        color: #0f172a !important;
-        padding: 14px 12px !important;
-        font-size: 0.9rem !important;
-        vertical-align: middle !important;
-    }
-    
-    .dataframe tbody td:first-child {
-        font-weight: 500 !important;
-    }
-    
-    /* Numeric columns alignment */
-    .dataframe tbody td[data-dtype="int64"],
-    .dataframe tbody td[data-dtype="float64"] {
-        text-align: right !important;
-        font-weight: 500 !important;
-    }
-    
-    /* Striped rows for better readability */
-    .dataframe tbody tr:nth-child(even) {
-        background-color: #f8f9fa !important;
-    }
-    
-    /* ===== CUSTOM DATAFRAME CLASS ===== */
-    .stDataFrame {
-        border-radius: 8px !important;
-    }
-
-    /* ===== PROFESSIONAL UI OVERRIDES (cleaner + more enterprise) ===== */
-    :root {
-        --st-brand: #00d084;   /* SalesTree green */
-        --st-navy: #0b2b4c;    /* deep navy */
-        --st-bg: #F7FAFC;      /* soft background */
-        --st-border: #e3e9f0;
-        --st-text: #1A202C;
-        --st-muted: #587089;
-        --st-hover: #e0fcff;
-    }
-
-    .stApp {
-        background: var(--st-bg) !important;
-    }
-
-    .main .block-container {
-        padding-top: 1.25rem !important;
-        padding-bottom: 2rem !important;
-    }
-
-    h1 {
-        color: var(--st-navy) !important;
-        font-size: 2.05rem !important;
-        letter-spacing: -0.5px !important;
-        margin-bottom: 1.0rem !important;
-    }
-
-    h2 {
-        color: var(--st-navy) !important;
-        font-size: 1.55rem !important;
-        margin-top: 1.25rem !important;
-        margin-bottom: 0.75rem !important;
-    }
-
-    h3, h4 {
-        color: var(--st-navy) !important;
-    }
-
-    div[data-testid="metric-container"] {
-        background: #ffffff !important;
-        border: 1px solid var(--st-border) !important;
-        border-radius: 12px !important;
-        box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06) !important;
-    }
-
-    div[data-testid="metric-container"] label {
-        text-transform: none !important;
-        letter-spacing: 0 !important;
-        font-size: 0.9rem !important;
-    }
-
-    /* Sidebar container */
-    [data-testid="stSidebar"] {
-        background: #ffffff !important;
-        border-right: 1px solid var(--st-border) !important;
-        box-shadow: 2px 0 18px rgba(16, 24, 40, 0.06) !important;
-    }
-
-    /* Sidebar spacing */
-    [data-testid="stSidebar"] .block-container {
-        padding-top: 1.25rem !important;
-    }
-
-    /* Sidebar radio menu: keep styling minimal & stable across Streamlit versions */
-    [data-testid="stSidebar"] [data-testid="stRadio"] {
-        margin-top: 0.25rem !important;
-        padding-top: 0 !important;
-    }
-
-    [data-testid="stSidebar"] [role="radiogroup"] {
-        width: 100% !important;
-    }
-
-    [data-testid="stSidebar"] [role="radiogroup"] label {
-        width: 100% !important;
-        display: block !important;
-        margin: 0 !important;
-    }
-
-    [data-testid="stSidebar"] [role="radiogroup"] label p {
-        margin: 0 !important;
-        white-space: normal !important;
-        word-break: keep-all !important;
-        overflow-wrap: anywhere !important;
-        line-height: 1.25 !important;
-    }
-
-    /* Make buttons less "playful" */
-    .stButton>button {
-        background: var(--st-brand) !important;
-        color: #072A40 !important;
-        border-radius: 10px !important;
-        box-shadow: 0 1px 2px rgba(16, 24, 40, 0.10) !important;
-    }
-
-    .stButton>button:hover {
-        background: #00b874 !important;
-        transform: none !important;
-        box-shadow: 0 2px 6px rgba(16, 24, 40, 0.16) !important;
-    }
-</style>
-""", unsafe_allow_html=True)
+apply_theme_css()
 
 # --- 3. DATABASE SETUP ---
 # NOTE: The app now uses SQLAlchemy Engine (ENGINE) so it can run on SQLite locally
@@ -653,7 +748,55 @@ def calculate_vat():
     st.session_state.calc_vat_val = vat
     st.session_state.calc_gross = gross
 
-# --- 4.5 INPUT VALIDATION ---
+# --- 4.5 CACHED DATA LOADERS ---
+@st.cache_data
+def load_gl_codes():
+    """Load GL codes with caching (rarely changes)"""
+    gl_df = pd.read_sql_query("SELECT code, description FROM gl_codes ORDER BY code", ENGINE)
+    return gl_df.apply(lambda x: f"{x['code']} - {x['description']}", axis=1).tolist()
+
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def load_journal_data():
+    """Load journal data with short-term caching"""
+    return pd.read_sql_query("SELECT * FROM journal", ENGINE)
+
+
+@st.cache_data(ttl=300)
+def load_counterparties(doc_types: Optional[tuple[str, ...]] = None) -> list[str]:
+    """Load distinct counterparties, optionally filtered by doc_type."""
+    base = (
+        "SELECT DISTINCT counterparty "
+        "FROM journal "
+        "WHERE counterparty IS NOT NULL AND counterparty != ''"
+    )
+    if doc_types:
+        # doc_types are internal constants, safe to inline
+        types_sql = ", ".join([f"'{t}'" for t in doc_types])
+        sql = f"{base} AND doc_type IN ({types_sql}) ORDER BY counterparty"
+    else:
+        sql = f"{base} ORDER BY counterparty"
+    df = pd.read_sql_query(sql, ENGINE)
+    if df.empty:
+        return []
+    vals = [str(x).strip() for x in df["counterparty"].tolist() if str(x).strip()]
+    vals.sort()
+    return vals
+
+
+@st.cache_data(ttl=300)
+def load_bank_accounts() -> list[str]:
+    """Load distinct bank accounts for dropdowns."""
+    df = pd.read_sql_query(
+        "SELECT DISTINCT bank_account FROM journal WHERE bank_account IS NOT NULL AND bank_account != '' ORDER BY bank_account",
+        ENGINE,
+    )
+    if df.empty:
+        return []
+    vals = [str(x).strip() for x in df["bank_account"].tolist() if str(x).strip()]
+    vals.sort()
+    return vals
+
+# --- 4.6 INPUT VALIDATION ---
 def validate_transaction_input(trans_data):
     """Validate transaction data before database insert."""
     errors = []
@@ -836,7 +979,7 @@ if count == 0:
     repo_excel = os.path.join(os.path.dirname(os.path.abspath(__file__)), "finance_data.xlsx")
     if os.path.exists(repo_excel):
         c2.caption("📦 Βρέθηκε τοπικό αρχείο: finance_data.xlsx")
-        if c2.button("⬇️ Import bundled finance_data.xlsx", use_container_width=True):
+        if c2.button("Import bundled finance_data.xlsx", width='stretch'):
             try:
                 inserted = _import_excel_to_db(repo_excel)
                 st.success(f"✅ Import ολοκληρώθηκε. Εγγραφές στη βάση: {inserted}")
@@ -886,24 +1029,70 @@ st.sidebar.markdown(
         unsafe_allow_html=True,
 )
 st.sidebar.caption(f"Συνδεδεμένος χρήστης: {st.session_state.username}")
+
+# DB status (helps verify you're writing to Supabase and not losing data)
+try:
+    if DB_DIALECT == "postgres":
+        d = _safe_db_diagnostics()
+        host = d.get("host", "")
+        dbn = d.get("db", "")
+        st.sidebar.caption(f"Βάση: Postgres (DATABASE_URL) {host}/{dbn}")
+    else:
+        st.sidebar.caption(f"Βάση: SQLite ({DB_FILE})")
+        if os.path.abspath(__file__).startswith("/mount/src/"):
+            st.sidebar.warning(
+                "ΠΡΟΣΟΧΗ: Σε Streamlit Cloud η SQLite μπορεί να χαθεί σε reboot/redeploy. "
+                "Για 100% μόνιμη αποθήκευση βάλε Postgres/Supabase (DATABASE_URL)."
+            )
+        else:
+            st.sidebar.info(
+                "Σημείωση: Η SQLite είναι τοπικό αρχείο. Για μόνιμη αποθήκευση/πολλαπλούς χρήστες προτίμησε Postgres/Supabase (DATABASE_URL)."
+            )
+except Exception:
+    pass
 st.sidebar.divider()
 
 st.sidebar.markdown("<div style='font-weight:700; color:#0b2b4c; margin:0.25rem 0 0.5rem 0;'>Μενού</div>", unsafe_allow_html=True)
 
 menu = st.sidebar.radio("ΜΕΝΟΥ", [
-    "📊 Dashboard",
-    "📝 Νέα Εγγραφή",
-    "📊 ΦΠΑ & Φόροι (Report)",
-    "📇 Καρτέλες (Ledgers)",
-    "📚 Αρχείο & Διορθώσεις",
-    "💵 Ταμείο & Τράπεζες",
-    "⚙️ Ρυθμίσεις GL"
+    "Dashboard",
+    "Νέα Εγγραφή",
+    "ΦΠΑ & Φόροι (Report)",
+    "Καρτέλες (Ledgers)",
+    "Αρχείο & Διορθώσεις",
+    "Ταμείο & Τράπεζες",
+    "Ρυθμίσεις GL"
 ], label_visibility="collapsed")
 
+# Theme toggle
+st.sidebar.divider()
+theme_option = st.sidebar.selectbox("Θέμα", ["Φωτεινό", "Σκοτεινό"], index=0 if st.session_state.theme == 'light' else 1)
+if theme_option == "Σκοτεινό" and st.session_state.theme == 'light':
+    st.session_state.theme = 'dark'
+    st.rerun()
+elif theme_option == "Φωτεινό" and st.session_state.theme == 'dark':
+    st.session_state.theme = 'light'
+    st.rerun()
+
+# Keyboard shortcuts help
+with st.sidebar.expander("⌨️ Συντομεύσεις Πληκτρολογίου", expanded=False):
+    st.markdown("""
+    **📝 Νέα Εγγραφή:**
+    - `Ctrl + S`: Αποθήκευση
+    
+    **🔍 Αναζήτηση:**
+    - `Ctrl + F`: Εστίαση στο πεδίο αναζήτησης
+    
+    **🧭 Πλοήγηση:**
+    - `Alt + 1-7`: Άμεση μετάβαση στο μενού
+    """)
+
 # --- DASHBOARD ---
-if menu == "📊 Dashboard":
+if menu == "Dashboard":
     st.title("📊 Γενική Εικόνα")
-    df = pd.read_sql_query("SELECT * FROM journal", ENGINE)
+    
+    with st.spinner("Φόρτωση δεδομένων..."):
+        df = load_journal_data()
     
     df['doc_date'] = pd.to_datetime(df['doc_date'], errors='coerce')
     cy = datetime.now().year
@@ -924,7 +1113,9 @@ if menu == "📊 Dashboard":
     grp = monthly.groupby(['mo','doc_type'])['amount_net'].sum().reset_index()
     
     # Create professional chart
-    fig = px.bar(grp, x='mo', y='amount_net', color='doc_type', barmode='group')
+    fig = px.bar(grp, x='mo', y='amount_net', color='doc_type', barmode='group',
+                 title="Μηνιαία Κίνηση Εσόδων/Εξόδων",
+                 labels={'mo': 'Μήνας', 'amount_net': 'Ποσό (€)', 'doc_type': 'Τύπος'})
     
     # Color mapping for professional palette
     color_map = {
@@ -978,7 +1169,7 @@ if menu == "📊 Dashboard":
         height=400
     )
     
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
     
     st.divider()
     st.subheader("📋 Τελευταίες Εγγραφές")
@@ -1004,14 +1195,13 @@ if menu == "📊 Dashboard":
     for col in ['Καθαρό', 'ΦΠΑ', 'Σύνολο']:
         df_display[col] = df_display[col].apply(lambda x: f"€{x:,.2f}")
     
-    st.dataframe(df_display, use_container_width=True, hide_index=True)
+    st.dataframe(df_display, width='stretch', hide_index=True)
 
 # --- NEW ENTRY ---
-elif menu == "📝 Νέα Εγγραφή":
+elif menu == "Νέα Εγγραφή":
     st.title("📝 Νέα Εγγραφή - Συναλλαγές Λογιστηρίου")
 
-    gl_df = pd.read_sql_query("SELECT code, description FROM gl_codes ORDER BY code", ENGINE)
-    gl_list = gl_df.apply(lambda x: f"{x['code']} - {x['description']}", axis=1).tolist()
+    gl_list = load_gl_codes()
     
     # Initialize VAT calculator state for this section
     if 'vat_calc_active' not in st.session_state:
@@ -1046,7 +1236,19 @@ elif menu == "📝 Νέα Εγγραφή":
         # Transaction-specific fields
         if trans_type == "💰 Εισπράξεις (Πωλήσεις)":
             st.subheader("📊 Στοιχεία Εισπράξης")
-            partner = st.text_input("Πελάτης", "")
+            customers = load_counterparties(("Income", "Cash Deposit"))
+            if customers:
+                sel_customer = st.selectbox(
+                    "Πελάτης (επιλογή)",
+                    ["(Νέος Πελάτης)"] + customers,
+                    key="partner_income_select",
+                )
+                if sel_customer == "(Νέος Πελάτης)":
+                    partner = st.text_input("Πελάτης", "", key="partner_income_text")
+                else:
+                    partner = sel_customer
+            else:
+                partner = st.text_input("Πελάτης", "", key="partner_income_text_only")
             descr = st.text_input("Περιγραφή", "Εισπράξη πωλήσεων")
             
             st.divider()
@@ -1070,12 +1272,43 @@ elif menu == "📝 Νέα Εγγραφή":
             
             p1, p2 = st.columns(2)
             pay = p1.selectbox("Τρόπος Εισπράξης", ["Τράπεζα", "Μετρητά", "Επί Πιστώσει"])
-            bank = p2.text_input("Λογαριασμός", "Alpha" if pay=="Τράπεζα" else "Ταμείο" if pay=="Μετρητά" else "")
+            if pay == "Τράπεζα":
+                bank_accounts = load_bank_accounts()
+                if bank_accounts:
+                    sel_bank = p2.selectbox(
+                        "Λογαριασμός (επιλογή)",
+                        ["(Νέος Λογαριασμός)"] + bank_accounts,
+                        key="bank_income_select",
+                    )
+                    if sel_bank == "(Νέος Λογαριασμός)":
+                        bank = p2.text_input("Λογαριασμός", "", key="bank_income_text")
+                    else:
+                        bank = sel_bank
+                else:
+                    bank = p2.text_input("Λογαριασμός", "", key="bank_income_text_only")
+            elif pay == "Μετρητά":
+                bank = "Ταμείο"
+                p2.text_input("Λογαριασμός", bank, disabled=True, key="bank_income_cash")
+            else:
+                bank = ""
+                p2.text_input("Λογαριασμός", bank, disabled=True, key="bank_income_credit")
             d_type = "Income"
         
         elif trans_type == "💸 Πληρωμές (Έξοδα)":
             st.subheader("📊 Στοιχεία Πληρωμής")
-            partner = st.text_input("Προμηθευτής / Δαπάνη", "")
+            suppliers = load_counterparties(("Expense", "Bill"))
+            if suppliers:
+                sel_supplier = st.selectbox(
+                    "Προμηθευτής (επιλογή)",
+                    ["(Νέος Προμηθευτής/Δαπάνη)"] + suppliers,
+                    key="partner_expense_select",
+                )
+                if sel_supplier == "(Νέος Προμηθευτής/Δαπάνη)":
+                    partner = st.text_input("Προμηθευτής / Δαπάνη", "", key="partner_expense_text")
+                else:
+                    partner = sel_supplier
+            else:
+                partner = st.text_input("Προμηθευτής / Δαπάνη", "", key="partner_expense_text_only")
             descr = st.text_input("Περιγραφή", "Έξοδο λειτουργίας")
             
             st.divider()
@@ -1099,12 +1332,43 @@ elif menu == "📝 Νέα Εγγραφή":
             
             p1, p2 = st.columns(2)
             pay = p1.selectbox("Τρόπος Πληρωμής", ["Τράπεζα", "Μετρητά", "Επί Πιστώσει"])
-            bank = p2.text_input("Λογαριασμός", "Alpha" if pay=="Τράπεζα" else "Ταμείο" if pay=="Μετρητά" else "")
+            if pay == "Τράπεζα":
+                bank_accounts = load_bank_accounts()
+                if bank_accounts:
+                    sel_bank = p2.selectbox(
+                        "Λογαριασμός (επιλογή)",
+                        ["(Νέος Λογαριασμός)"] + bank_accounts,
+                        key="bank_expense_select",
+                    )
+                    if sel_bank == "(Νέος Λογαριασμός)":
+                        bank = p2.text_input("Λογαριασμός", "", key="bank_expense_text")
+                    else:
+                        bank = sel_bank
+                else:
+                    bank = p2.text_input("Λογαριασμός", "", key="bank_expense_text_only")
+            elif pay == "Μετρητά":
+                bank = "Ταμείο"
+                p2.text_input("Λογαριασμός", bank, disabled=True, key="bank_expense_cash")
+            else:
+                bank = ""
+                p2.text_input("Λογαριασμός", bank, disabled=True, key="bank_expense_credit")
             d_type = "Expense"
         
         elif trans_type == "📄 Τιμολόγια Αγορών":
             st.subheader("📊 Στοιχεία Τιμολογίου Αγοράς")
-            partner = st.text_input("Προμηθευτής", "")
+            suppliers = load_counterparties(("Expense", "Bill"))
+            if suppliers:
+                sel_supplier = st.selectbox(
+                    "Προμηθευτής (επιλογή)",
+                    ["(Νέος Προμηθευτής)"] + suppliers,
+                    key="partner_bill_select",
+                )
+                if sel_supplier == "(Νέος Προμηθευτής)":
+                    partner = st.text_input("Προμηθευτής", "", key="partner_bill_text")
+                else:
+                    partner = sel_supplier
+            else:
+                partner = st.text_input("Προμηθευτής", "", key="partner_bill_text_only")
             descr = st.text_input("Περιγραφή Αγοράς", "Αγορά αγαθών/υπηρεσιών")
             
             st.divider()
@@ -1128,7 +1392,21 @@ elif menu == "📝 Νέα Εγγραφή":
             
             p1, p2 = st.columns(2)
             pay = p1.selectbox("Κατάσταση", ["Επί Πιστώσει", "Πληρωμένο"])
-            bank = p2.text_input("Λογαριασμός", "")
+            bank_accounts = load_bank_accounts()
+            if bank_accounts:
+                sel_bank = p2.selectbox(
+                    "Λογαριασμός (επιλογή)",
+                    ["(Κενό)", "(Νέος Λογαριασμός)"] + bank_accounts,
+                    key="bank_bill_select",
+                )
+                if sel_bank == "(Κενό)":
+                    bank = ""
+                elif sel_bank == "(Νέος Λογαριασμός)":
+                    bank = p2.text_input("Λογαριασμός", "", key="bank_bill_text")
+                else:
+                    bank = sel_bank
+            else:
+                bank = p2.text_input("Λογαριασμός", "", key="bank_bill_text_only")
             d_type = "Bill"
         
         elif trans_type == "🔄 Μεταφορές Λογαριασμών":
@@ -1197,7 +1475,19 @@ elif menu == "📝 Νέα Εγγραφή":
         
         else:  # Άλλη Συναλλαγή
             st.subheader("📊 Στοιχεία Συναλλαγής")
-            partner = st.text_input("Συναλλασσόμενος", "")
+            partners = load_counterparties(None)
+            if partners:
+                sel_partner = st.selectbox(
+                    "Συναλλασσόμενος (επιλογή)",
+                    ["(Νέος Συναλλασσόμενος)"] + partners,
+                    key="partner_other_select",
+                )
+                if sel_partner == "(Νέος Συναλλασσόμενος)":
+                    partner = st.text_input("Συναλλασσόμενος", "", key="partner_other_text")
+                else:
+                    partner = sel_partner
+            else:
+                partner = st.text_input("Συναλλασσόμενος", "", key="partner_other_text_only")
             descr = st.text_input("Περιγραφή", "")
             
             st.divider()
@@ -1217,13 +1507,27 @@ elif menu == "📝 Νέα Εγγραφή":
                 st.number_input("Σύνολο (€)", value=st.session_state.calc_gross, disabled=True, key="display_gross_other")
             
             pay = st.selectbox("Κατηγορία", ["Income", "Expense", "Bill", "Other"])
-            bank = st.text_input("Λογαριασμός", "")
+            bank_accounts = load_bank_accounts()
+            if bank_accounts:
+                sel_bank = st.selectbox(
+                    "Λογαριασμός (επιλογή)",
+                    ["(Κενό)", "(Νέος Λογαριασμός)"] + bank_accounts,
+                    key="bank_other_select",
+                )
+                if sel_bank == "(Κενό)":
+                    bank = ""
+                elif sel_bank == "(Νέος Λογαριασμός)":
+                    bank = st.text_input("Λογαριασμός", "", key="bank_other_text")
+                else:
+                    bank = sel_bank
+            else:
+                bank = st.text_input("Λογαριασμός", "", key="bank_other_text_only")
             vat = st.session_state.calc_vat_val
             gross = st.session_state.calc_gross
             d_type = pay
         
         st.divider()
-        if st.button("💾 ΑΠΟΘΗΚΕΥΣΗ", type="primary", use_container_width=True):
+        if st.button("ΑΠΟΘΗΚΕΥΣΗ", type="primary", width='stretch'):
             # Validate input
             trans_data = {
                 'partner': partner,
@@ -1276,6 +1580,7 @@ elif menu == "📝 Νέα Εγγραφή":
                             "status": status,
                         },
                     )
+                    st.cache_data.clear()  # Clear cache after new transaction
                     st.success("✅ Καταχωρήθηκε με επιτυχία!")
                     # Reset values
                     st.session_state.calc_net = 0.0
@@ -1290,10 +1595,10 @@ elif menu == "📝 Νέα Εγγραφή":
             # Do not force rerun on validation/errors; otherwise messages flash and disappear.
 
 # --- VAT & TAX REPORT (FIXED LOGIC) ---
-elif menu == "📊 ΦΠΑ & Φόροι (Report)":
+elif menu == "ΦΠΑ & Φόροι (Report)":
     st.title("📊 Αναλυτική Έκθεση ΦΠΑ & Φόρων")
 
-    df = pd.read_sql_query("SELECT * FROM journal", ENGINE)
+    df = load_journal_data()
     
     # Convert date to datetime and clean data
     df['doc_date'] = pd.to_datetime(df['doc_date'], errors='coerce')
@@ -1388,7 +1693,7 @@ elif menu == "📊 ΦΠΑ & Φόροι (Report)":
         vat_summary['ΦΠΑ %'] = (vat_summary['ΦΠΑ'] / vat_summary['Καθαρό'] * 100).round(1)
         # Replace .applymap with lambda
         vat_summary = vat_summary.map(lambda x: f"€{x:,.2f}" if isinstance(x, (int, float)) else x)
-        st.dataframe(vat_summary, use_container_width=True)
+        st.dataframe(vat_summary, width='stretch')
     
     with tab_tax:
         st.write("**Υπολογισμός Φόρου Εισοδήματος**")
@@ -1440,7 +1745,7 @@ elif menu == "📊 ΦΠΑ & Φόροι (Report)":
         for col in ['Καθαρό', 'ΦΠΑ', 'Σύνολο']:
             df_display[col] = df_display[col].apply(lambda x: f"€{x:,.2f}")
         
-        st.dataframe(df_display, use_container_width=True, hide_index=True)
+        st.dataframe(df_display, width='stretch', hide_index=True)
         
         # Download as CSV
         csv = df_display.to_csv(index=False, encoding='utf-8-sig')
@@ -1452,7 +1757,7 @@ elif menu == "📊 ΦΠΑ & Φόροι (Report)":
         )
 
 # --- LEDGERS ---
-elif menu == "📇 Καρτέλες (Ledgers)":
+elif menu == "Καρτέλες (Ledgers)":
     st.title("📇 Καρτέλες Συναλλασσομένων")
 
     partners_df = pd.read_sql_query(
@@ -1550,7 +1855,7 @@ elif menu == "📇 Καρτέλες (Ledgers)":
             for col in ['Καθαρό', 'ΦΠΑ', 'Σύνολο']:
                 df_display[col] = df_display[col].apply(lambda x: f"€{x:,.2f}")
             
-            st.dataframe(df_display, use_container_width=True, hide_index=True)
+            st.dataframe(df_display, width='stretch', hide_index=True)
             
             st.divider()
             # Summary by transaction type
@@ -1567,7 +1872,7 @@ elif menu == "📇 Καρτέλες (Ledgers)":
             for col in summary_display.columns:
                 summary_display[col] = summary_display[col].apply(lambda x: f"€{x:,.2f}")
             
-            st.dataframe(summary_display, use_container_width=True)
+            st.dataframe(summary_display, width='stretch')
             
             st.divider()
             # Download button
@@ -1580,10 +1885,11 @@ elif menu == "📇 Καρτέλες (Ledgers)":
             )
 
 # --- ARCHIVE ---
-elif menu == "📚 Αρχείο & Διορθώσεις":
+elif menu == "Αρχείο & Διορθώσεις":
     st.title("📚 Αρχείο & Διορθώσεις")
 
-    df = pd.read_sql_query("SELECT id, * FROM journal ORDER BY doc_date DESC", ENGINE)
+    with st.spinner("Φόρτωση αρχείου..."):
+        df = pd.read_sql_query("SELECT id, * FROM journal ORDER BY doc_date DESC", ENGINE)
     
     if df.empty:
         st.info("📭 Δεν υπάρχουν καταχωρήσεις στο αρχείο")
@@ -1596,12 +1902,48 @@ elif menu == "📚 Αρχείο & Διορθώσεις":
     
     st.subheader("📋 Όλες οι Εγγραφές")
     
-    # Filters
+    # Advanced Filters
+    with st.expander("🔍 Προηγμένα Φίλτρα", expanded=False):
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.markdown("**Από Ημερομηνία**")
+            st.caption("Επιλέξτε την αρχική ημερομηνία για φιλτράρισμα")
+            date_from = st.date_input("Από Ημερομηνία", 
+                                    value=df['doc_date'].min().date() if not df.empty else date.today(),
+                                    key="arch_date_from")
+        
+        with col2:
+            st.markdown("**Έως Ημερομηνία**")
+            st.caption("Επιλέξτε την τελική ημερομηνία για φιλτράρισμα")
+            date_to = st.date_input("Έως Ημερομηνία", 
+                                  value=df['doc_date'].max().date() if not df.empty else date.today(),
+                                  key="arch_date_to")
+        
+        with col3:
+            st.markdown("**Ελάχιστο Ποσό**")
+            st.caption("Εμφάνιση συναλλαγών άνω του ποσού αυτού")
+            amount_min = st.number_input("Ελάχιστο Ποσό (€)", 
+                                       min_value=0.0, 
+                                       value=0.0, 
+                                       step=10.0,
+                                       key="arch_amount_min")
+        
+        with col4:
+            st.markdown("**Μέγιστο Ποσό**")
+            st.caption("Εμφάνιση συναλλαγών κάτω του ποσού αυτού")
+            amount_max = st.number_input("Μέγιστο Ποσό (€)", 
+                                       min_value=0.0, 
+                                       value=float(df['amount_gross'].max()) if not df.empty else 10000.0, 
+                                       step=10.0,
+                                       key="arch_amount_max")
+    
+    # Basic Filters
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
         sort_by = st.selectbox("Ταξινόμηση", 
-                              ["Πιο Πρόσφατες", "Πιο Παλιές", "Μεγαλύτερα Ποσά"],
+                              ["Πιο Πρόσφατες", "Πιο Παλιές", "Μεγαλύτερα Ποσά", "Μικρότερα Ποσά"],
                               key="arch_sort")
     
     with col2:
@@ -1633,10 +1975,18 @@ elif menu == "📚 Αρχείο & Διορθώσεις":
     
     # Apply filters
     mask = doc_type_series.isin(selected_type)
+    
+    # Date range filter
+    mask = mask & (df['doc_date'].dt.date >= date_from) & (df['doc_date'].dt.date <= date_to)
+    
+    # Amount range filter
+    mask = mask & (df['amount_gross'] >= amount_min) & (df['amount_gross'] <= amount_max)
+    
     if search_term:
         mask = mask & (
             (df['counterparty'].str.contains(search_term, case=False, na=False)) |
-            (df['description'].str.contains(search_term, case=False, na=False))
+            (df['description'].str.contains(search_term, case=False, na=False)) |
+            (df['doc_no'].str.contains(search_term, case=False, na=False))
         )
     
     df_filtered = df[mask].copy()
@@ -1646,8 +1996,10 @@ elif menu == "📚 Αρχείο & Διορθώσεις":
         df_filtered = df_filtered.sort_values('doc_date', ascending=False)
     elif sort_by == "Πιο Παλιές":
         df_filtered = df_filtered.sort_values('doc_date', ascending=True)
-    else:
+    elif sort_by == "Μεγαλύτερα Ποσά":
         df_filtered = df_filtered.sort_values('amount_gross', ascending=False)
+    else:  # Μικρότερα Ποσά
+        df_filtered = df_filtered.sort_values('amount_gross', ascending=True)
     
     if df_filtered.empty:
         st.warning("⚠️ Δεν βρέθηκαν εγγραφές")
@@ -1675,11 +2027,11 @@ elif menu == "📚 Αρχείο & Διορθώσεις":
                     
                     col_edit, col_del, col_id = st.columns([2, 2, 1])
                     with col_edit:
-                        if st.button("✏️ Επεξεργασία", key=f"list_edit_{rid}", use_container_width=True):
+                        if st.button("Επεξεργασία", key=f"list_edit_{rid}", width='stretch'):
                             st.session_state[f"edit_mode_{rid}"] = True
                             st.rerun()
                     with col_del:
-                        if st.button("🗑️ Διαγραφή", key=f"list_del_{rid}", use_container_width=True):
+                        if st.button("Διαγραφή", key=f"list_del_{rid}", width='stretch'):
                             db_execute("DELETE FROM journal WHERE id = :id", {"id": rid})
                             st.success("Διαγράφηκε!")
                             time.sleep(0.3)
@@ -1755,7 +2107,7 @@ elif menu == "📚 Αρχείο & Διορθώσεις":
                     
                     col_upd, col_del = st.columns(2)
                     with col_upd:
-                        if st.button("Ενημέρωση", key=f"det_upd_{rid}", use_container_width=True, type="primary"):
+                        if st.button("Ενημέρωση", key=f"det_upd_{rid}", width='stretch', type="primary"):
                             # Validate updated data
                             upd_data = {
                                 'partner': new_partner,
@@ -1797,15 +2149,17 @@ elif menu == "📚 Αρχείο & Διορθώσεις":
                                             "id": rid,
                                         },
                                     )
+                                    st.cache_data.clear()  # Clear cache after update
                                     st.success("✓ Ενημερώθηκε!")
                                     time.sleep(0.3)
                                     st.rerun()
                                 except Exception as e:
                                     st.error(f"❌ Σφάλμα κατά την ενημέρωση: {str(e)}")
                     with col_del:
-                        if st.button("Διαγραφή", key=f"det_del_{rid}", use_container_width=True, type="secondary"):
+                        if st.button("Διαγραφή", key=f"det_del_{rid}", width='stretch', type="secondary"):
                             try:
                                 db_execute("DELETE FROM journal WHERE id = :id", {"id": rid})
+                                st.cache_data.clear()  # Clear cache after delete
                                 st.error("✗ Διαγράφηκε!")
                                 time.sleep(0.3)
                                 st.rerun()
@@ -1813,10 +2167,10 @@ elif menu == "📚 Αρχείο & Διορθώσεις":
                                 st.error(f"❌ Σφάλμα κατά τη διαγραφή: {str(e)}")
 
 # --- TREASURY ---
-elif menu == "💵 Ταμείο & Τράπεζες":
+elif menu == "Ταμείο & Τράπεζες":
     st.title("💵 Διαχείριση Διαθεσίμων")
 
-    df_all = pd.read_sql_query("SELECT * FROM journal", ENGINE)
+    df_all = load_journal_data()
     
     df_all['doc_date'] = pd.to_datetime(df_all['doc_date'], errors='coerce')
     df_all = clean_dataframe(df_all)
@@ -1903,7 +2257,7 @@ elif menu == "💵 Ταμείο & Τράπεζες":
     
     if account_summary:
         acc_df_display = pd.DataFrame(account_summary)
-        st.dataframe(acc_df_display, use_container_width=True, hide_index=True)
+        st.dataframe(acc_df_display, width='stretch', hide_index=True)
     
     st.divider()
     
@@ -1942,7 +2296,7 @@ elif menu == "💵 Ταμείο & Τράπεζες":
         axis=1
     )
     
-    st.dataframe(df_display, use_container_width=True, hide_index=True)
+    st.dataframe(df_display, width='stretch', hide_index=True)
     
     # Monthly balance chart
     st.divider()
@@ -1978,7 +2332,7 @@ elif menu == "💵 Ταμείο & Τράπεζες":
             height=400
         )
         
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
         
         st.info(f"📌 **Τελευταία ενημέρωση:** {df['doc_date'].max().strftime('%d/%m/%Y')}")
     
@@ -1992,7 +2346,7 @@ elif menu == "💵 Ταμείο & Τράπεζες":
     """)
 
 # --- SETTINGS ---
-elif menu == "⚙️ Ρυθμίσεις GL":
+elif menu == "Ρυθμίσεις GL":
     st.title("⚙️ Διαχείριση Ρυθμίσεων")
     
     
@@ -2020,9 +2374,9 @@ elif menu == "⚙️ Ρυθμίσεις GL":
         
         with col1:
             st.write("**Υπάρχουσες Ρυθμίσεις:**")
-            edited_gl = st.data_editor(df_gl, num_rows="dynamic", use_container_width=True, key="gl_editor")
+            edited_gl = st.data_editor(df_gl, num_rows="dynamic", width='stretch', key="gl_editor")
             
-            if st.button("💾 Αποθήκευση GL Codes", use_container_width=True, type="primary"):
+            if st.button("Αποθήκευση GL Codes", width='stretch', type="primary"):
                 try:
                     db_execute("DELETE FROM gl_codes")
                     rows = [
@@ -2049,7 +2403,7 @@ elif menu == "⚙️ Ρυθμίσεις GL":
             new_code = st.text_input("Κωδικός", placeholder="π.χ. 500")
             new_desc = st.text_input("Περιγραφή", placeholder="π.χ. Πωλήσεις Υπηρεσιών")
             
-            if st.button("➕ Προσθήκη GL", use_container_width=True):
+            if st.button("Προσθήκη GL", width='stretch'):
                 if new_code and new_desc:
                     try:
                         db_execute(
@@ -2083,7 +2437,7 @@ elif menu == "⚙️ Ρυθμίσεις GL":
             st.write("**Υπάρχοντες Πελάτες:**")
             if customers:
                 customers_df = pd.DataFrame({'Όνομα Πελάτη': customers})
-                st.dataframe(customers_df, use_container_width=True, hide_index=True)
+                st.dataframe(customers_df, width='stretch', hide_index=True)
             else:
                 st.info("Δεν υπάρχουν εγγεγραμμένοι πελάτες ακόμα")
         
@@ -2091,22 +2445,50 @@ elif menu == "⚙️ Ρυθμίσεις GL":
             st.write("**Προσθήκη Νέου Πελάτη:**")
             customer_name = st.text_input("Όνομα Πελάτη", placeholder="π.χ. ΑΒΓ ΑΕ")
             
-            if st.button("➕ Προσθήκη Πελάτη", use_container_width=True):
+            if st.button("Προσθήκη Πελάτη", width='stretch'):
                 if customer_name:
                     try:
-                        # Add a test entry to register the customer
-                        db_execute(
-                            """INSERT INTO journal (doc_date, counterparty, description, amount_net, amount_gross, status)
-                               VALUES (:doc_date, :counterparty, :description, :amount_net, :amount_gross, :status)""",
-                            {
-                                "doc_date": datetime.now().strftime('%Y-%m-%d'),
-                                "counterparty": customer_name,
-                                "description": "(αρχικοποίηση)",
-                                "amount_net": 0.0,
-                                "amount_gross": 0.0,
-                                "status": "Paid",
-                            },
+                        customer_name = str(customer_name).strip()
+                        already = int(
+                            db_scalar(
+                                "SELECT COUNT(*) FROM journal WHERE counterparty = :c AND doc_type IN ('Income', 'Cash Deposit')",
+                                {"c": customer_name},
+                                default=0,
+                            )
                         )
+                        if already > 0:
+                            st.info("Ο πελάτης υπάρχει ήδη στη λίστα.")
+                        else:
+                            # Fix older bootstrap rows that were inserted without doc_type
+                            needs_fix = int(
+                                db_scalar(
+                                    "SELECT COUNT(*) FROM journal WHERE counterparty = :c AND (doc_type IS NULL OR doc_type = '')",
+                                    {"c": customer_name},
+                                    default=0,
+                                )
+                            )
+                            if needs_fix > 0:
+                                db_execute(
+                                    "UPDATE journal SET doc_type = 'Income' WHERE counterparty = :c AND (doc_type IS NULL OR doc_type = '')",
+                                    {"c": customer_name},
+                                )
+                            else:
+                                # Add a test entry to register the customer
+                                db_execute(
+                                    """INSERT INTO journal (doc_date, doc_type, counterparty, description, amount_net, vat_amount, amount_gross, status)
+                                       VALUES (:doc_date, :doc_type, :counterparty, :description, :amount_net, :vat_amount, :amount_gross, :status)""",
+                                    {
+                                        "doc_date": datetime.now().strftime('%Y-%m-%d'),
+                                        "doc_type": "Income",
+                                        "counterparty": customer_name,
+                                        "description": "(αρχικοποίηση)",
+                                        "amount_net": 0.0,
+                                        "vat_amount": 0.0,
+                                        "amount_gross": 0.0,
+                                        "status": "Paid",
+                                    },
+                                )
+                        st.cache_data.clear()
                         st.success(f"✓ Πελάτης '{customer_name}' προστέθηκε!")
                         time.sleep(0.3)
                         st.rerun()
@@ -2134,7 +2516,7 @@ elif menu == "⚙️ Ρυθμίσεις GL":
             st.write("**Υπάρχοντες Προμηθευτές:**")
             if suppliers:
                 suppliers_df = pd.DataFrame({'Όνομα Προμηθευτή': suppliers})
-                st.dataframe(suppliers_df, use_container_width=True, hide_index=True)
+                st.dataframe(suppliers_df, width='stretch', hide_index=True)
             else:
                 st.info("Δεν υπάρχουν εγγεγραμμένοι προμηθευτές ακόμα")
         
@@ -2142,22 +2524,50 @@ elif menu == "⚙️ Ρυθμίσεις GL":
             st.write("**Προσθήκη Νέου Προμηθευτή:**")
             supplier_name = st.text_input("Όνομα Προμηθευτή", placeholder="π.χ. ΔΕΖ ΑΕ")
             
-            if st.button("➕ Προσθήκη Προμηθευτή", use_container_width=True):
+            if st.button("Προσθήκη Προμηθευτή", width='stretch'):
                 if supplier_name:
                     try:
-                        # Add a test entry to register the supplier
-                        db_execute(
-                            """INSERT INTO journal (doc_date, counterparty, description, amount_net, amount_gross, status)
-                               VALUES (:doc_date, :counterparty, :description, :amount_net, :amount_gross, :status)""",
-                            {
-                                "doc_date": datetime.now().strftime('%Y-%m-%d'),
-                                "counterparty": supplier_name,
-                                "description": "(αρχικοποίηση)",
-                                "amount_net": 0.0,
-                                "amount_gross": 0.0,
-                                "status": "Paid",
-                            },
+                        supplier_name = str(supplier_name).strip()
+                        already = int(
+                            db_scalar(
+                                "SELECT COUNT(*) FROM journal WHERE counterparty = :c AND doc_type IN ('Expense', 'Bill')",
+                                {"c": supplier_name},
+                                default=0,
+                            )
                         )
+                        if already > 0:
+                            st.info("Ο προμηθευτής υπάρχει ήδη στη λίστα.")
+                        else:
+                            # Fix older bootstrap rows that were inserted without doc_type
+                            needs_fix = int(
+                                db_scalar(
+                                    "SELECT COUNT(*) FROM journal WHERE counterparty = :c AND (doc_type IS NULL OR doc_type = '')",
+                                    {"c": supplier_name},
+                                    default=0,
+                                )
+                            )
+                            if needs_fix > 0:
+                                db_execute(
+                                    "UPDATE journal SET doc_type = 'Expense' WHERE counterparty = :c AND (doc_type IS NULL OR doc_type = '')",
+                                    {"c": supplier_name},
+                                )
+                            else:
+                                # Add a test entry to register the supplier
+                                db_execute(
+                                    """INSERT INTO journal (doc_date, doc_type, counterparty, description, amount_net, vat_amount, amount_gross, status)
+                                       VALUES (:doc_date, :doc_type, :counterparty, :description, :amount_net, :vat_amount, :amount_gross, :status)""",
+                                    {
+                                        "doc_date": datetime.now().strftime('%Y-%m-%d'),
+                                        "doc_type": "Expense",
+                                        "counterparty": supplier_name,
+                                        "description": "(αρχικοποίηση)",
+                                        "amount_net": 0.0,
+                                        "vat_amount": 0.0,
+                                        "amount_gross": 0.0,
+                                        "status": "Paid",
+                                    },
+                                )
+                        st.cache_data.clear()
                         st.success(f"✓ Προμηθευτής '{supplier_name}' προστέθηκε!")
                         time.sleep(0.3)
                         st.rerun()
@@ -2185,7 +2595,7 @@ elif menu == "⚙️ Ρυθμίσεις GL":
             st.write("**Υπάρχοντες Λογαριασμοί:**")
             if accounts:
                 accounts_df = pd.DataFrame({'Λογαριασμός': accounts})
-                st.dataframe(accounts_df, use_container_width=True, hide_index=True)
+                st.dataframe(accounts_df, width='stretch', hide_index=True)
             else:
                 st.info("Δεν υπάρχουν εγγεγραμμένοι λογαριασμοί ακόμα")
         
@@ -2195,23 +2605,37 @@ elif menu == "⚙️ Ρυθμίσεις GL":
             account_type = st.selectbox("Τύπος Λογαριασμού", ["Τράπεζα", "Ταμείο"])
             account_name = st.text_input("Όνομα Λογαριασμού", placeholder="π.χ. Alpha Bank EUR")
             
-            if st.button("➕ Άνοιγμα Λογαριασμού", use_container_width=True):
+            if st.button("Άνοιγμα Λογαριασμού", width='stretch'):
                 if account_name:
                     full_account = f"{account_type} - {account_name}"
                     try:
-                        # Add initial entry
-                        db_execute(
-                            """INSERT INTO journal (doc_date, bank_account, description, amount_net, amount_gross, status)
-                               VALUES (:doc_date, :bank_account, :description, :amount_net, :amount_gross, :status)""",
-                            {
-                                "doc_date": datetime.now().strftime('%Y-%m-%d'),
-                                "bank_account": full_account,
-                                "description": "(άνοιγμα λογαριασμού)",
-                                "amount_net": 0.0,
-                                "amount_gross": 0.0,
-                                "status": "Paid",
-                            },
+                        full_account = str(full_account).strip()
+                        already = int(
+                            db_scalar(
+                                "SELECT COUNT(*) FROM journal WHERE bank_account = :b",
+                                {"b": full_account},
+                                default=0,
+                            )
                         )
+                        if already > 0:
+                            st.info("Ο λογαριασμός υπάρχει ήδη στη λίστα.")
+                        else:
+                            # Add initial entry
+                            db_execute(
+                                """INSERT INTO journal (doc_date, doc_type, bank_account, description, amount_net, vat_amount, amount_gross, status)
+                                   VALUES (:doc_date, :doc_type, :bank_account, :description, :amount_net, :vat_amount, :amount_gross, :status)""",
+                                {
+                                    "doc_date": datetime.now().strftime('%Y-%m-%d'),
+                                    "doc_type": "Bank Operation",
+                                    "bank_account": full_account,
+                                    "description": "(άνοιγμα λογαριασμού)",
+                                    "amount_net": 0.0,
+                                    "vat_amount": 0.0,
+                                    "amount_gross": 0.0,
+                                    "status": "Paid",
+                                },
+                            )
+                        st.cache_data.clear()
                         st.success(f"✓ Λογαριασμός '{full_account}' δημιουργήθηκε!")
                         time.sleep(0.3)
                         st.rerun()
@@ -2241,8 +2665,8 @@ elif menu == "⚙️ Ρυθμίσεις GL":
         # Database reset
         st.warning("⚠️ **Επικίνδυνες Λειτουργίες** (χρησιμοποιήστε με προσοχή)")
         
-        if st.button("🗑️ Διαγραφή ΌΛΩΝ των δεδομένων (Reset DB)", use_container_width=True, type="secondary"):
-            if st.button("✓ Επιβεβαίωση: Διαγραφή όλων", use_container_width=True):
+        if st.button("Διαγραφή ΌΛΩΝ των δεδομένων (Reset DB)", width='stretch', type="secondary"):
+            if st.button("Επιβεβαίωση: Διαγραφή όλων", width='stretch'):
                 try:
                     db_execute("DELETE FROM journal")
                     db_execute("DELETE FROM gl_codes")
