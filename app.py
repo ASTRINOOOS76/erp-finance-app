@@ -5,7 +5,7 @@ import plotly.express as px
 import os
 import time
 import subprocess
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, Optional, Set
 from datetime import datetime, date
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 from sqlalchemy import create_engine, text
@@ -699,6 +699,8 @@ def init_db():
                 kind TEXT NOT NULL DEFAULT 'bank'
             )"""
         )
+
+    _ensure_journal_schema()
     
     # Create indices for common queries
     for stmt in [
@@ -744,6 +746,66 @@ def init_db():
         except Exception:
             # Ignore duplicates
             pass
+
+
+def _journal_expected_columns() -> Dict[str, str]:
+    if DB_DIALECT == "postgres":
+        return {
+            "doc_date": "DATE",
+            "doc_no": "TEXT",
+            "doc_type": "TEXT",
+            "counterparty": "TEXT",
+            "description": "TEXT",
+            "gl_code": "TEXT",
+            "amount_net": "DOUBLE PRECISION",
+            "vat_amount": "DOUBLE PRECISION",
+            "amount_gross": "DOUBLE PRECISION",
+            "payment_method": "TEXT",
+            "bank_account": "TEXT",
+            "status": "TEXT",
+        }
+    return {
+        "doc_date": "DATE",
+        "doc_no": "TEXT",
+        "doc_type": "TEXT",
+        "counterparty": "TEXT",
+        "description": "TEXT",
+        "gl_code": "TEXT",
+        "amount_net": "REAL",
+        "vat_amount": "REAL",
+        "amount_gross": "REAL",
+        "payment_method": "TEXT",
+        "bank_account": "TEXT",
+        "status": "TEXT",
+    }
+
+
+def _get_journal_columns() -> Set[str]:
+    try:
+        if DB_DIALECT == "postgres":
+            cols_df = pd.read_sql_query(
+                "SELECT column_name FROM information_schema.columns WHERE table_name = 'journal'",
+                ENGINE,
+            )
+            return set(cols_df["column_name"].tolist())
+        cols_df = pd.read_sql_query("PRAGMA table_info(journal)", ENGINE)
+        return set(cols_df["name"].tolist())
+    except Exception:
+        return set()
+
+
+def _ensure_journal_schema() -> None:
+    expected_cols = _journal_expected_columns()
+    existing_cols = _get_journal_columns()
+    missing_cols = [col for col in expected_cols if col not in existing_cols]
+    if not missing_cols:
+        return
+    for col in missing_cols:
+        col_type = expected_cols[col]
+        if DB_DIALECT == "postgres":
+            db_execute(f"ALTER TABLE journal ADD COLUMN IF NOT EXISTS {col} {col_type}")
+        else:
+            db_execute(f"ALTER TABLE journal ADD COLUMN {col} {col_type}")
 
 
 def _counterparty_kind_for_doc_type(doc_type: str) -> str:
