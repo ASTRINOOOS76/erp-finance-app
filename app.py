@@ -935,7 +935,8 @@ def load_counterparties(doc_types: Optional[tuple[str, ...]] = None) -> list[str
         f"SELECT name FROM ({sql_j} UNION SELECT name FROM counterparties {kind_filter_sql}) u "
         "ORDER BY name"
     )
-    df = pd.read_sql_query(sql, ENGINE, params=params)
+    # Use SQLAlchemy `text()` so named parameters (e.g. :k) work on Postgres.
+    df = pd.read_sql_query(text(sql), ENGINE, params=params)
     if df.empty:
         return []
     vals = [str(x).strip() for x in df["name"].tolist() if str(x).strip()]
