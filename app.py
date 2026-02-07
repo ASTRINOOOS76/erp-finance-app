@@ -650,6 +650,18 @@ def init_db():
                 description TEXT
             )"""
         )
+        db_execute(
+            """CREATE TABLE IF NOT EXISTS counterparties (
+                name TEXT PRIMARY KEY,
+                kind TEXT NOT NULL DEFAULT 'other'
+            )"""
+        )
+        db_execute(
+            """CREATE TABLE IF NOT EXISTS bank_accounts (
+                name TEXT PRIMARY KEY,
+                kind TEXT NOT NULL DEFAULT 'bank'
+            )"""
+        )
     else:
         db_execute(
             """CREATE TABLE IF NOT EXISTS journal (
@@ -663,6 +675,18 @@ def init_db():
         db_execute(
             """CREATE TABLE IF NOT EXISTS gl_codes (
                 code TEXT PRIMARY KEY, description TEXT
+            )"""
+        )
+        db_execute(
+            """CREATE TABLE IF NOT EXISTS counterparties (
+                name TEXT PRIMARY KEY,
+                kind TEXT NOT NULL DEFAULT 'other'
+            )"""
+        )
+        db_execute(
+            """CREATE TABLE IF NOT EXISTS bank_accounts (
+                name TEXT PRIMARY KEY,
+                kind TEXT NOT NULL DEFAULT 'bank'
             )"""
         )
     
@@ -711,8 +735,124 @@ def init_db():
             # Ignore duplicates
             pass
 
+
+def _counterparty_kind_for_doc_type(doc_type: str) -> str:
+    dt = (doc_type or "").strip()
+    if dt in {"Income", "Cash Deposit"}:
+        return "customer"
+    if dt in {"Expense", "Bill"}:
+        return "supplier"
+    return "other"
+
+
+def _bank_kind_from_name(name: str) -> str:
+    n = (name or "").strip().casefold()
+    if not n:
+        return "bank"
+    if n.startswith("ταμείο") or "ταμείο" in n or n.startswith("cash") or "cash" in n:
+        return "cash"
+    if n.startswith("ταμειο") or "ταμειο" in n:
+        return "cash"
+    if n.startswith("ταμείο -") or n.startswith("ταμειο -"):
+        return "cash"
+    if n.startswith("τράπεζ") or n.startswith("τραπεζ"):
+        return "bank"
+    return "bank"
+
+
+def upsert_counterparty(name: str, kind: str) -> None:
+    nm = (name or "").strip()
+    kd = (kind or "other").strip() or "other"
+    if not nm:
+        return
+    if DB_DIALECT == "postgres":
+        db_execute(
+            "INSERT INTO counterparties (name, kind) VALUES (:name, :kind) ON CONFLICT (name) DO UPDATE SET kind = EXCLUDED.kind",
+            {"name": nm, "kind": kd},
+        )
+    else:
+        # SQLite supports ON CONFLICT with DO UPDATE
+        db_execute(
+            "INSERT INTO counterparties (name, kind) VALUES (:name, :kind) ON CONFLICT(name) DO UPDATE SET kind=excluded.kind",
+            {"name": nm, "kind": kd},
+        )
+
+
+def upsert_bank_account(name: str, kind: str) -> None:
+    nm = (name or "").strip()
+    kd = (kind or "bank").strip() or "bank"
+    if not nm:
+        return
+    if DB_DIALECT == "postgres":
+        db_execute(
+            "INSERT INTO bank_accounts (name, kind) VALUES (:name, :kind) ON CONFLICT (name) DO UPDATE SET kind = EXCLUDED.kind",
+            {"name": nm, "kind": kd},
+        )
+    else:
+        db_execute(
+            "INSERT INTO bank_accounts (name, kind) VALUES (:name, :kind) ON CONFLICT(name) DO UPDATE SET kind=excluded.kind",
+            {"name": nm, "kind": kd},
+        )
+
+
+def migrate_placeholders_to_lookups() -> None:
+    """Migrate legacy Settings 'placeholder' rows from journal into lookup tables.
+
+    Older versions stored Customers/Suppliers/Bank accounts by inserting 0-amount rows
+    into `journal`. Those rows should not pollute the Archive.
+    """
+    try:
+        df_cp = pd.read_sql_query(
+            """
+            SELECT DISTINCT counterparty AS name, doc_type
+            FROM journal
+            WHERE counterparty IS NOT NULL AND counterparty != ''
+              AND description = '(αρχικοποίηση)'
+              AND COALESCE(amount_net,0)=0 AND COALESCE(vat_amount,0)=0 AND COALESCE(amount_gross,0)=0
+            """,
+            ENGINE,
+        )
+        if not df_cp.empty:
+            for r in df_cp.itertuples(index=False):
+                upsert_counterparty(str(r.name), _counterparty_kind_for_doc_type(str(r.doc_type)))
+            db_execute(
+                """
+                DELETE FROM journal
+                WHERE description = '(αρχικοποίηση)'
+                  AND COALESCE(amount_net,0)=0 AND COALESCE(vat_amount,0)=0 AND COALESCE(amount_gross,0)=0
+                """
+            )
+    except Exception:
+        pass
+
+    try:
+        df_ba = pd.read_sql_query(
+            """
+            SELECT DISTINCT bank_account AS name
+            FROM journal
+            WHERE bank_account IS NOT NULL AND bank_account != ''
+              AND description = '(άνοιγμα λογαριασμού)'
+              AND COALESCE(amount_net,0)=0 AND COALESCE(vat_amount,0)=0 AND COALESCE(amount_gross,0)=0
+            """,
+            ENGINE,
+        )
+        if not df_ba.empty:
+            for r in df_ba.itertuples(index=False):
+                nm = str(r.name)
+                upsert_bank_account(nm, _bank_kind_from_name(nm))
+            db_execute(
+                """
+                DELETE FROM journal
+                WHERE description = '(άνοιγμα λογαριασμού)'
+                  AND COALESCE(amount_net,0)=0 AND COALESCE(vat_amount,0)=0 AND COALESCE(amount_gross,0)=0
+                """
+            )
+    except Exception:
+        pass
+
 try:
     init_db()
+    migrate_placeholders_to_lookups()
 except OperationalError:
     st.error("❌ Δεν μπορώ να συνδεθώ στη βάση Postgres (DATABASE_URL).")
     diag = _safe_db_diagnostics()
@@ -764,22 +904,42 @@ def load_journal_data():
 @st.cache_data(ttl=300)
 def load_counterparties(doc_types: Optional[tuple[str, ...]] = None) -> list[str]:
     """Load distinct counterparties, optionally filtered by doc_type."""
+    # From journal
     base = (
-        "SELECT DISTINCT counterparty "
+        "SELECT DISTINCT counterparty AS name "
         "FROM journal "
         "WHERE counterparty IS NOT NULL AND counterparty != ''"
     )
     if doc_types:
-        # doc_types are internal constants, safe to inline
         types_sql = ", ".join([f"'{t}'" for t in doc_types])
-        sql = f"{base} AND doc_type IN ({types_sql}) ORDER BY counterparty"
+        sql_j = f"{base} AND doc_type IN ({types_sql})"
     else:
-        sql = f"{base} ORDER BY counterparty"
-    df = pd.read_sql_query(sql, ENGINE)
+        sql_j = base
+
+    # From lookup table (filtered by inferred kind when doc_types provided)
+    kind_filter_sql = ""
+    params: Dict[str, Any] = {}
+    if doc_types:
+        kinds = {_counterparty_kind_for_doc_type(t) for t in doc_types}
+        # Only narrow when the inferred kinds are meaningful
+        if kinds <= {"customer"}:
+            kind_filter_sql = "WHERE kind = :k"
+            params["k"] = "customer"
+        elif kinds <= {"supplier"}:
+            kind_filter_sql = "WHERE kind = :k"
+            params["k"] = "supplier"
+        else:
+            kind_filter_sql = ""
+
+    sql = (
+        f"SELECT name FROM ({sql_j} UNION SELECT name FROM counterparties {kind_filter_sql}) u "
+        "ORDER BY name"
+    )
+    df = pd.read_sql_query(sql, ENGINE, params=params)
     if df.empty:
         return []
-    vals = [str(x).strip() for x in df["counterparty"].tolist() if str(x).strip()]
-    vals.sort()
+    vals = [str(x).strip() for x in df["name"].tolist() if str(x).strip()]
+    vals = sorted(set(vals), key=str.casefold)
     return vals
 
 
@@ -787,13 +947,24 @@ def load_counterparties(doc_types: Optional[tuple[str, ...]] = None) -> list[str
 def load_bank_accounts() -> list[str]:
     """Load distinct bank accounts for dropdowns."""
     df = pd.read_sql_query(
-        "SELECT DISTINCT bank_account FROM journal WHERE bank_account IS NOT NULL AND bank_account != '' ORDER BY bank_account",
+        """
+        SELECT name FROM (
+            SELECT DISTINCT bank_account AS name
+            FROM journal
+            WHERE bank_account IS NOT NULL AND bank_account != ''
+            UNION
+            SELECT name
+            FROM bank_accounts
+            WHERE name IS NOT NULL AND name != ''
+        ) u
+        ORDER BY name
+        """,
         ENGINE,
     )
     if df.empty:
         return []
-    vals = [str(x).strip() for x in df["bank_account"].tolist() if str(x).strip()]
-    vals.sort()
+    vals = [str(x).strip() for x in df["name"].tolist() if str(x).strip()]
+    vals = sorted(set(vals), key=str.casefold)
     return vals
 
 # --- 4.6 INPUT VALIDATION ---
@@ -1547,6 +1718,16 @@ elif menu == "Νέα Εγγραφή":
                             "status": status,
                         },
                     )
+                    # Keep Settings lookup lists in sync (so you can edit/delete there)
+                    try:
+                        upsert_counterparty(partner, _counterparty_kind_for_doc_type(d_type))
+                    except Exception:
+                        pass
+                    try:
+                        if bank and str(bank).strip():
+                            upsert_bank_account(bank, _bank_kind_from_name(bank))
+                    except Exception:
+                        pass
                     st.cache_data.clear()  # Clear cache after new transaction
                     st.success("✅ Καταχωρήθηκε με επιτυχία!")
                     # Reset values
@@ -2359,6 +2540,7 @@ elif menu == "Ρυθμίσεις GL":
                             "INSERT INTO gl_codes (code, description) VALUES (:code, :description)",
                             rows,
                         )
+                    st.cache_data.clear()
                     st.success("✓ GL Codes αποθηκεύτηκαν!")
                     time.sleep(0.5)
                     st.rerun()
@@ -2377,6 +2559,7 @@ elif menu == "Ρυθμίσεις GL":
                             "INSERT INTO gl_codes (code, description) VALUES (:code, :description)",
                             {"code": str(new_code).strip(), "description": str(new_desc).strip()},
                         )
+                        st.cache_data.clear()
                         st.success("✓ Προστέθηκε!")
                         time.sleep(0.3)
                         st.rerun()
@@ -2388,13 +2571,11 @@ elif menu == "Ρυθμίσεις GL":
     # --- TAB 2: CUSTOMERS ---
     with tab_customers:
         st.subheader("👥 Διαχείριση Πελατών")
-        
-        # Get unique customers from journal
-        df_journal = pd.read_sql_query(
-            "SELECT DISTINCT counterparty FROM journal WHERE doc_type IN ('Income', 'Cash Deposit') AND counterparty != ''",
+        df_customers = pd.read_sql_query(
+            "SELECT name FROM counterparties WHERE kind = 'customer' ORDER BY name",
             ENGINE,
         )
-        customers = sorted(df_journal['counterparty'].unique().tolist()) if not df_journal.empty else []
+        customers = df_customers["name"].tolist() if not df_customers.empty else []
         
         st.write(f"**Σύνολο Πελατών:** {len(customers)}")
         
@@ -2416,45 +2597,7 @@ elif menu == "Ρυθμίσεις GL":
                 if customer_name:
                     try:
                         customer_name = str(customer_name).strip()
-                        already = int(
-                            db_scalar(
-                                "SELECT COUNT(*) FROM journal WHERE counterparty = :c AND doc_type IN ('Income', 'Cash Deposit')",
-                                {"c": customer_name},
-                                default=0,
-                            )
-                        )
-                        if already > 0:
-                            st.info("Ο πελάτης υπάρχει ήδη στη λίστα.")
-                        else:
-                            # Fix older bootstrap rows that were inserted without doc_type
-                            needs_fix = int(
-                                db_scalar(
-                                    "SELECT COUNT(*) FROM journal WHERE counterparty = :c AND (doc_type IS NULL OR doc_type = '')",
-                                    {"c": customer_name},
-                                    default=0,
-                                )
-                            )
-                            if needs_fix > 0:
-                                db_execute(
-                                    "UPDATE journal SET doc_type = 'Income' WHERE counterparty = :c AND (doc_type IS NULL OR doc_type = '')",
-                                    {"c": customer_name},
-                                )
-                            else:
-                                # Add a test entry to register the customer
-                                db_execute(
-                                    """INSERT INTO journal (doc_date, doc_type, counterparty, description, amount_net, vat_amount, amount_gross, status)
-                                       VALUES (:doc_date, :doc_type, :counterparty, :description, :amount_net, :vat_amount, :amount_gross, :status)""",
-                                    {
-                                        "doc_date": datetime.now().strftime('%Y-%m-%d'),
-                                        "doc_type": "Income",
-                                        "counterparty": customer_name,
-                                        "description": "(αρχικοποίηση)",
-                                        "amount_net": 0.0,
-                                        "vat_amount": 0.0,
-                                        "amount_gross": 0.0,
-                                        "status": "Paid",
-                                    },
-                                )
+                        upsert_counterparty(customer_name, "customer")
                         st.cache_data.clear()
                         st.success(f"✓ Πελάτης '{customer_name}' προστέθηκε!")
                         time.sleep(0.3)
@@ -2463,17 +2606,59 @@ elif menu == "Ρυθμίσεις GL":
                         st.error(f"Σφάλμα: {str(e)}")
                 else:
                     st.warning("Εισάγετε όνομα πελάτη")
+
+            st.divider()
+            st.write("**Διόρθωση / Διαγραφή Πελάτη:**")
+            if customers:
+                sel_customer = st.selectbox("Επιλογή Πελάτη", customers, key="cust_sel")
+                new_name = st.text_input("Νέο Όνομα", value=str(sel_customer), key="cust_rename")
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    if st.button("Αποθήκευση Αλλαγής", width='stretch', key="cust_save", type="primary"):
+                        try:
+                            old = str(sel_customer).strip()
+                            nn = str(new_name).strip()
+                            if not nn:
+                                st.warning("Το νέο όνομα δεν μπορεί να είναι κενό")
+                            else:
+                                if old != nn:
+                                    db_execute(
+                                        "UPDATE journal SET counterparty = :nn WHERE counterparty = :old",
+                                        {"nn": nn, "old": old},
+                                    )
+                                    db_execute(
+                                        "DELETE FROM counterparties WHERE name = :old",
+                                        {"old": old},
+                                    )
+                                upsert_counterparty(nn, "customer")
+                                st.cache_data.clear()
+                                st.success("✓ Ενημερώθηκε!")
+                                time.sleep(0.3)
+                                st.rerun()
+                        except Exception as e:
+                            st.error(f"Σφάλμα: {str(e)}")
+                with col_b:
+                    if st.button("Διαγραφή από λίστα", width='stretch', type="secondary", key="cust_del"):
+                        try:
+                            nm = str(sel_customer).strip()
+                            db_execute("DELETE FROM counterparties WHERE name = :n", {"n": nm})
+                            st.cache_data.clear()
+                            st.success("✓ Διαγράφηκε από τη λίστα.")
+                            time.sleep(0.3)
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Σφάλμα: {str(e)}")
+            else:
+                st.info("Δεν υπάρχουν πελάτες για αφαίρεση")
     
     # --- TAB 3: SUPPLIERS ---
     with tab_suppliers:
         st.subheader("🏭 Διαχείριση Προμηθευτών")
-        
-        # Get unique suppliers from journal
-        df_journal = pd.read_sql_query(
-            "SELECT DISTINCT counterparty FROM journal WHERE doc_type IN ('Expense', 'Bill') AND counterparty != ''",
+        df_suppliers = pd.read_sql_query(
+            "SELECT name FROM counterparties WHERE kind = 'supplier' ORDER BY name",
             ENGINE,
         )
-        suppliers = sorted(df_journal['counterparty'].unique().tolist()) if not df_journal.empty else []
+        suppliers = df_suppliers["name"].tolist() if not df_suppliers.empty else []
         
         st.write(f"**Σύνολο Προμηθευτών:** {len(suppliers)}")
         
@@ -2495,45 +2680,7 @@ elif menu == "Ρυθμίσεις GL":
                 if supplier_name:
                     try:
                         supplier_name = str(supplier_name).strip()
-                        already = int(
-                            db_scalar(
-                                "SELECT COUNT(*) FROM journal WHERE counterparty = :c AND doc_type IN ('Expense', 'Bill')",
-                                {"c": supplier_name},
-                                default=0,
-                            )
-                        )
-                        if already > 0:
-                            st.info("Ο προμηθευτής υπάρχει ήδη στη λίστα.")
-                        else:
-                            # Fix older bootstrap rows that were inserted without doc_type
-                            needs_fix = int(
-                                db_scalar(
-                                    "SELECT COUNT(*) FROM journal WHERE counterparty = :c AND (doc_type IS NULL OR doc_type = '')",
-                                    {"c": supplier_name},
-                                    default=0,
-                                )
-                            )
-                            if needs_fix > 0:
-                                db_execute(
-                                    "UPDATE journal SET doc_type = 'Expense' WHERE counterparty = :c AND (doc_type IS NULL OR doc_type = '')",
-                                    {"c": supplier_name},
-                                )
-                            else:
-                                # Add a test entry to register the supplier
-                                db_execute(
-                                    """INSERT INTO journal (doc_date, doc_type, counterparty, description, amount_net, vat_amount, amount_gross, status)
-                                       VALUES (:doc_date, :doc_type, :counterparty, :description, :amount_net, :vat_amount, :amount_gross, :status)""",
-                                    {
-                                        "doc_date": datetime.now().strftime('%Y-%m-%d'),
-                                        "doc_type": "Expense",
-                                        "counterparty": supplier_name,
-                                        "description": "(αρχικοποίηση)",
-                                        "amount_net": 0.0,
-                                        "vat_amount": 0.0,
-                                        "amount_gross": 0.0,
-                                        "status": "Paid",
-                                    },
-                                )
+                        upsert_counterparty(supplier_name, "supplier")
                         st.cache_data.clear()
                         st.success(f"✓ Προμηθευτής '{supplier_name}' προστέθηκε!")
                         time.sleep(0.3)
@@ -2542,17 +2689,59 @@ elif menu == "Ρυθμίσεις GL":
                         st.error(f"Σφάλμα: {str(e)}")
                 else:
                     st.warning("Εισάγετε όνομα προμηθευτή")
+
+            st.divider()
+            st.write("**Διόρθωση / Διαγραφή Προμηθευτή:**")
+            if suppliers:
+                sel_supplier = st.selectbox("Επιλογή Προμηθευτή", suppliers, key="sup_sel")
+                new_name = st.text_input("Νέο Όνομα", value=str(sel_supplier), key="sup_rename")
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    if st.button("Αποθήκευση Αλλαγής", width='stretch', key="sup_save", type="primary"):
+                        try:
+                            old = str(sel_supplier).strip()
+                            nn = str(new_name).strip()
+                            if not nn:
+                                st.warning("Το νέο όνομα δεν μπορεί να είναι κενό")
+                            else:
+                                if old != nn:
+                                    db_execute(
+                                        "UPDATE journal SET counterparty = :nn WHERE counterparty = :old",
+                                        {"nn": nn, "old": old},
+                                    )
+                                    db_execute(
+                                        "DELETE FROM counterparties WHERE name = :old",
+                                        {"old": old},
+                                    )
+                                upsert_counterparty(nn, "supplier")
+                                st.cache_data.clear()
+                                st.success("✓ Ενημερώθηκε!")
+                                time.sleep(0.3)
+                                st.rerun()
+                        except Exception as e:
+                            st.error(f"Σφάλμα: {str(e)}")
+                with col_b:
+                    if st.button("Διαγραφή από λίστα", width='stretch', type="secondary", key="sup_del"):
+                        try:
+                            nm = str(sel_supplier).strip()
+                            db_execute("DELETE FROM counterparties WHERE name = :n", {"n": nm})
+                            st.cache_data.clear()
+                            st.success("✓ Διαγράφηκε από τη λίστα.")
+                            time.sleep(0.3)
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Σφάλμα: {str(e)}")
+            else:
+                st.info("Δεν υπάρχουν προμηθευτές για αφαίρεση")
     
     # --- TAB 4: BANK ACCOUNTS ---
     with tab_banks:
         st.subheader("🏦 Διαχείριση Τραπεζικών Λογαριασμών")
-        
-        # Get unique bank accounts
-        df_journal = pd.read_sql_query(
-            "SELECT DISTINCT bank_account FROM journal WHERE bank_account != '' AND bank_account IS NOT NULL",
+        df_accounts = pd.read_sql_query(
+            "SELECT name, kind FROM bank_accounts ORDER BY name",
             ENGINE,
         )
-        accounts = sorted(df_journal['bank_account'].unique().tolist()) if not df_journal.empty else []
+        accounts = df_accounts["name"].tolist() if not df_accounts.empty else []
         
         st.write(f"**Σύνολο Λογαριασμών:** {len(accounts)}")
         
@@ -2561,8 +2750,10 @@ elif menu == "Ρυθμίσεις GL":
         with col1:
             st.write("**Υπάρχοντες Λογαριασμοί:**")
             if accounts:
-                accounts_df = pd.DataFrame({'Λογαριασμός': accounts})
-                st.dataframe(accounts_df, width='stretch', hide_index=True)
+                show_df = df_accounts.copy()
+                show_df["kind"] = show_df["kind"].map({"bank": "Τράπεζα", "cash": "Ταμείο"}).fillna(show_df["kind"])
+                show_df.columns = ["Λογαριασμός", "Τύπος"]
+                st.dataframe(show_df, width='stretch', hide_index=True)
             else:
                 st.info("Δεν υπάρχουν εγγεγραμμένοι λογαριασμοί ακόμα")
         
@@ -2577,31 +2768,7 @@ elif menu == "Ρυθμίσεις GL":
                     full_account = f"{account_type} - {account_name}"
                     try:
                         full_account = str(full_account).strip()
-                        already = int(
-                            db_scalar(
-                                "SELECT COUNT(*) FROM journal WHERE bank_account = :b",
-                                {"b": full_account},
-                                default=0,
-                            )
-                        )
-                        if already > 0:
-                            st.info("Ο λογαριασμός υπάρχει ήδη στη λίστα.")
-                        else:
-                            # Add initial entry
-                            db_execute(
-                                """INSERT INTO journal (doc_date, doc_type, bank_account, description, amount_net, vat_amount, amount_gross, status)
-                                   VALUES (:doc_date, :doc_type, :bank_account, :description, :amount_net, :vat_amount, :amount_gross, :status)""",
-                                {
-                                    "doc_date": datetime.now().strftime('%Y-%m-%d'),
-                                    "doc_type": "Bank Operation",
-                                    "bank_account": full_account,
-                                    "description": "(άνοιγμα λογαριασμού)",
-                                    "amount_net": 0.0,
-                                    "vat_amount": 0.0,
-                                    "amount_gross": 0.0,
-                                    "status": "Paid",
-                                },
-                            )
+                        upsert_bank_account(full_account, "cash" if account_type == "Ταμείο" else "bank")
                         st.cache_data.clear()
                         st.success(f"✓ Λογαριασμός '{full_account}' δημιουργήθηκε!")
                         time.sleep(0.3)
@@ -2610,6 +2777,59 @@ elif menu == "Ρυθμίσεις GL":
                         st.error(f"Σφάλμα: {str(e)}")
                 else:
                     st.warning("Εισάγετε όνομα λογαριασμού")
+
+            st.divider()
+            st.write("**Διόρθωση / Διαγραφή Λογαριασμού:**")
+            if accounts:
+                sel_account = st.selectbox("Επιλογή Λογαριασμού", accounts, key="bank_sel")
+                cur_kind = (
+                    df_accounts.set_index("name").loc[sel_account, "kind"]
+                    if (not df_accounts.empty and sel_account in set(df_accounts["name"]))
+                    else "bank"
+                )
+                new_kind_label = st.selectbox(
+                    "Τύπος",
+                    ["Τράπεζα", "Ταμείο"],
+                    index=0 if str(cur_kind) == "bank" else 1,
+                    key="bank_kind",
+                )
+                new_name = st.text_input("Νέο Όνομα", value=str(sel_account), key="bank_rename")
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    if st.button("Αποθήκευση Αλλαγής", width='stretch', key="bank_save", type="primary"):
+                        try:
+                            old = str(sel_account).strip()
+                            nn = str(new_name).strip()
+                            kd = "cash" if new_kind_label == "Ταμείο" else "bank"
+                            if not nn:
+                                st.warning("Το νέο όνομα δεν μπορεί να είναι κενό")
+                            else:
+                                if old != nn:
+                                    db_execute(
+                                        "UPDATE journal SET bank_account = :nn WHERE bank_account = :old",
+                                        {"nn": nn, "old": old},
+                                    )
+                                    db_execute("DELETE FROM bank_accounts WHERE name = :old", {"old": old})
+                                upsert_bank_account(nn, kd)
+                                st.cache_data.clear()
+                                st.success("✓ Ενημερώθηκε!")
+                                time.sleep(0.3)
+                                st.rerun()
+                        except Exception as e:
+                            st.error(f"Σφάλμα: {str(e)}")
+                with col_b:
+                    if st.button("Διαγραφή από λίστα", width='stretch', type="secondary", key="bank_del"):
+                        try:
+                            nm = str(sel_account).strip()
+                            db_execute("DELETE FROM bank_accounts WHERE name = :n", {"n": nm})
+                            st.cache_data.clear()
+                            st.success("✓ Διαγράφηκε από τη λίστα.")
+                            time.sleep(0.3)
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Σφάλμα: {str(e)}")
+            else:
+                st.info("Δεν υπάρχουν λογαριασμοί για αφαίρεση")
     
     # --- TAB 5: SYSTEM ---
     with tab_system:
@@ -2669,6 +2889,14 @@ elif menu == "Ρυθμίσεις GL":
                 try:
                     db_execute("DELETE FROM journal")
                     db_execute("DELETE FROM gl_codes")
+                    try:
+                        db_execute("DELETE FROM counterparties")
+                    except Exception:
+                        pass
+                    try:
+                        db_execute("DELETE FROM bank_accounts")
+                    except Exception:
+                        pass
                     init_db()
                     st.error("✗ Η βάση καθαρίστηκε πλήρως!")
                     st.info("Η εφαρμογή ξανα-αρχικοποίησε τα βασικά GL codes.")
