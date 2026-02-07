@@ -1371,6 +1371,9 @@ elif menu == "Νέα Εγγραφή":
         d_date = c1.date_input("Ημερομηνία", date.today())
         d_no = c2.text_input("Αρ. Παρ/κου / Αναφορά")
         gl_choice = c3.selectbox("Λογαριασμός (GL)", gl_list if gl_list else ["999"])
+
+        # Default status (can be overridden per transaction)
+        status = "Paid"
         
         # Transaction-specific fields
         if trans_type == "💰 Εισπράξεις (Πωλήσεις)":
@@ -1411,6 +1414,13 @@ elif menu == "Νέα Εγγραφή":
             
             p1, p2 = st.columns(2)
             pay = p1.selectbox("Τρόπος Εισπράξης", ["Τράπεζα", "Μετρητά", "Επί Πιστώσει"])
+            status_label = p1.selectbox(
+                "Κατάσταση",
+                ["✅ Πληρωμένη", "⏳ Εκκρεμής"],
+                index=1 if pay == "Επί Πιστώσει" else 0,
+                key="status_income",
+            )
+            status = "Unpaid" if "Εκκρεμής" in status_label else "Paid"
             if pay == "Τράπεζα":
                 bank_accounts = load_bank_accounts()
                 if bank_accounts:
@@ -1471,6 +1481,13 @@ elif menu == "Νέα Εγγραφή":
             
             p1, p2 = st.columns(2)
             pay = p1.selectbox("Τρόπος Πληρωμής", ["Τράπεζα", "Μετρητά", "Επί Πιστώσει"])
+            status_label = p1.selectbox(
+                "Κατάσταση",
+                ["✅ Πληρωμένη", "⏳ Εκκρεμής"],
+                index=1 if pay == "Επί Πιστώσει" else 0,
+                key="status_expense",
+            )
+            status = "Unpaid" if "Εκκρεμής" in status_label else "Paid"
             if pay == "Τράπεζα":
                 bank_accounts = load_bank_accounts()
                 if bank_accounts:
@@ -1531,6 +1548,13 @@ elif menu == "Νέα Εγγραφή":
             
             p1, p2 = st.columns(2)
             pay = p1.selectbox("Κατάσταση", ["Επί Πιστώσει", "Πληρωμένο"])
+            status_label = p1.selectbox(
+                "Κατάσταση Πληρωμής",
+                ["✅ Πληρωμένη", "⏳ Εκκρεμής"],
+                index=1 if pay == "Επί Πιστώσει" else 0,
+                key="status_bill",
+            )
+            status = "Unpaid" if "Εκκρεμής" in status_label else "Paid"
             bank_accounts = load_bank_accounts()
             if bank_accounts:
                 sel_bank = p2.selectbox(
@@ -1569,6 +1593,7 @@ elif menu == "Νέα Εγγραφή":
             vat = 0.0
             gross = st.session_state.calc_net
             d_type = "Transfer"
+            status = "Paid"
         
         elif trans_type == "💵 Αναλήψεις Ταμείου":
             st.subheader("💳 Ανάληψη Χρημάτων από Τράπεζα")
@@ -1583,6 +1608,7 @@ elif menu == "Νέα Εγγραφή":
             gross = st.session_state.calc_net
             pay = "Ανάληψη"
             d_type = "Cash Withdrawal"
+            status = "Paid"
         
         elif trans_type == "💳 Καταθέσεις Ταμείου":
             st.subheader("💳 Κατάθεση Χρημάτων στην Τράπεζα")
@@ -1597,6 +1623,7 @@ elif menu == "Νέα Εγγραφή":
             gross = st.session_state.calc_net
             pay = "Κατάθεση"
             d_type = "Cash Deposit"
+            status = "Paid"
         
         elif trans_type == "🏦 Τραπεζικές Λειτουργίες":
             st.subheader("🏦 Τραπεζική Συναλλαγή")
@@ -1611,6 +1638,7 @@ elif menu == "Νέα Εγγραφή":
             gross = st.session_state.calc_net
             pay = "Τράπεζα"
             d_type = "Bank Operation"
+            status = "Paid"
         
         else:  # Άλλη Συναλλαγή
             st.subheader("📊 Στοιχεία Συναλλαγής")
@@ -1646,6 +1674,13 @@ elif menu == "Νέα Εγγραφή":
                 st.number_input("Σύνολο (€)", value=st.session_state.calc_gross, disabled=True, key="display_gross_other")
             
             pay = st.selectbox("Κατηγορία", ["Income", "Expense", "Bill", "Other"])
+            status_label = st.selectbox(
+                "Κατάσταση",
+                ["✅ Πληρωμένη", "⏳ Εκκρεμής"],
+                index=0,
+                key="status_other",
+            )
+            status = "Unpaid" if "Εκκρεμής" in status_label else "Paid"
             bank_accounts = load_bank_accounts()
             if bank_accounts:
                 sel_bank = st.selectbox(
@@ -1692,7 +1727,6 @@ elif menu == "Νέα Εγγραφή":
                         vat_amount = 0.0
                         gross_amount = float(st.session_state.calc_net) if st.session_state.calc_net else 0.0
                     
-                    status = "Unpaid" if pay in ["Επί Πιστώσει"] else "Paid"
                     gl_val = gl_choice.split(" - ")[0] if gl_choice else "999"
                     doc_date_iso = d_date.strftime('%Y-%m-%d') if hasattr(d_date, 'strftime') else str(d_date)
 
@@ -2177,7 +2211,8 @@ elif menu == "Αρχείο & Διορθώσεις":
                     col_edit, col_del, col_id = st.columns([2, 2, 1])
                     with col_edit:
                         if st.button("Επεξεργασία", key=f"list_edit_{rid}", width='stretch'):
-                            st.session_state[f"edit_mode_{rid}"] = True
+                            st.session_state["arch_display"] = "Λεπτομέρειες"
+                            st.session_state["arch_focus_id"] = rid
                             st.rerun()
                     with col_del:
                         if st.button("Διαγραφή", key=f"list_del_{rid}", width='stretch'):
@@ -2190,7 +2225,16 @@ elif menu == "Αρχείο & Διορθώσεις":
         
         else:
             # ΛΕΠΤΟΜΕΡΕΙΕΣ
-            for row in df_filtered.itertuples(index=False):
+            focus_id = st.session_state.get("arch_focus_id")
+            rows_iter = df_filtered.itertuples(index=False)
+            if focus_id is not None:
+                try:
+                    focus_id_int = int(focus_id)
+                    rows_iter = df_filtered[df_filtered["id"] == focus_id_int].itertuples(index=False)
+                except Exception:
+                    pass
+
+            for row in rows_iter:
                 rid = int(row.id)
                 ddate = row.doc_date.strftime('%d/%m/%Y')
                 cparty = row.counterparty if row.counterparty else '—'
@@ -2233,6 +2277,22 @@ elif menu == "Αρχείο & Διορθώσεις":
                         pays = ["Τράπεζα", "Μετρητά", "Επί Πιστώσει"]
                         cur_pay = row.payment_method if row.payment_method in pays else pays[0]
                         new_pay = st.selectbox("Πληρωμή", pays, index=pays.index(cur_pay), key=f"ed_py_{rid}")
+                        bank_accounts = load_bank_accounts()
+                        cur_bank = str(row.bank_account or "").strip()
+                        bank_opts = ["(Κενό)", "(Νέος Λογαριασμός)"] + bank_accounts
+                        if cur_bank and cur_bank in bank_accounts:
+                            bank_idx = bank_opts.index(cur_bank)
+                        elif not cur_bank:
+                            bank_idx = 0
+                        else:
+                            bank_idx = 1
+                        sel_bank = st.selectbox("Λογαριασμός", bank_opts, index=bank_idx, key=f"ed_ba_sel_{rid}")
+                        if sel_bank == "(Κενό)":
+                            new_bank = ""
+                        elif sel_bank == "(Νέος Λογαριασμός)":
+                            new_bank = st.text_input("Νέος Λογαριασμός", value=cur_bank, key=f"ed_ba_new_{rid}")
+                        else:
+                            new_bank = sel_bank
                     
                     with f3:
                         new_net = st.number_input("Καθαρό €", value=float(row.amount_net), key=f"ed_net_{rid}")
@@ -2247,6 +2307,22 @@ elif menu == "Αρχείο & Διορθώσεις":
                         new_stat = st.selectbox("Κατάσταση", stats, 
                                                index=stats.index(row.status) if row.status in stats else 1,
                                                key=f"ed_st_{rid}")
+                        gl_list = load_gl_codes()
+                        cur_gl = str(row.gl_code or "").strip()
+                        gl_opts = gl_list if gl_list else ["999"]
+                        # Map stored code to display option
+                        gl_display = cur_gl
+                        if cur_gl:
+                            for opt in gl_opts:
+                                if str(opt).split(" - ")[0] == cur_gl:
+                                    gl_display = opt
+                                    break
+                        if gl_display in gl_opts:
+                            gl_idx = gl_opts.index(gl_display)
+                        else:
+                            gl_idx = 0
+                        new_gl_choice = st.selectbox("GL", gl_opts, index=gl_idx, key=f"ed_gl_{rid}")
+                        new_gl = str(new_gl_choice).split(" - ")[0] if new_gl_choice else "999"
                     
                     new_vat = round(new_net * (new_vat_rate / 100), 2)
                     new_gross = round(new_net + new_vat, 2)
@@ -2278,10 +2354,12 @@ elif menu == "Αρχείο & Διορθώσεις":
                                                 doc_type = :doc_type,
                                                 counterparty = :counterparty,
                                                 description = :description,
+                                                gl_code = :gl_code,
                                                 amount_net = :amount_net,
                                                 vat_amount = :vat_amount,
                                                 amount_gross = :amount_gross,
                                                 payment_method = :payment_method,
+                                                bank_account = :bank_account,
                                                 status = :status
                                             WHERE id = :id""",
                                         {
@@ -2290,15 +2368,18 @@ elif menu == "Αρχείο & Διορθώσεις":
                                             "doc_type": new_type,
                                             "counterparty": new_partner,
                                             "description": new_descr,
+                                            "gl_code": new_gl,
                                             "amount_net": float(new_net),
                                             "vat_amount": float(new_vat),
                                             "amount_gross": float(new_gross),
                                             "payment_method": new_pay,
+                                            "bank_account": new_bank,
                                             "status": new_stat,
                                             "id": rid,
                                         },
                                     )
                                     st.cache_data.clear()  # Clear cache after update
+                                    st.session_state.pop("arch_focus_id", None)
                                     st.success("✓ Ενημερώθηκε!")
                                     time.sleep(0.3)
                                     st.rerun()
@@ -2309,6 +2390,7 @@ elif menu == "Αρχείο & Διορθώσεις":
                             try:
                                 db_execute("DELETE FROM journal WHERE id = :id", {"id": rid})
                                 st.cache_data.clear()  # Clear cache after delete
+                                st.session_state.pop("arch_focus_id", None)
                                 st.error("✗ Διαγράφηκε!")
                                 time.sleep(0.3)
                                 st.rerun()
