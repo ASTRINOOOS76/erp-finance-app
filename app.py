@@ -1028,28 +1028,6 @@ st.sidebar.markdown(
         """,
         unsafe_allow_html=True,
 )
-st.sidebar.caption(f"Συνδεδεμένος χρήστης: {st.session_state.username}")
-
-# DB status (helps verify you're writing to Supabase and not losing data)
-try:
-    if DB_DIALECT == "postgres":
-        d = _safe_db_diagnostics()
-        host = d.get("host", "")
-        dbn = d.get("db", "")
-        st.sidebar.caption(f"Βάση: Postgres (DATABASE_URL) {host}/{dbn}")
-    else:
-        st.sidebar.caption(f"Βάση: SQLite ({DB_FILE})")
-        if os.path.abspath(__file__).startswith("/mount/src/"):
-            st.sidebar.warning(
-                "ΠΡΟΣΟΧΗ: Σε Streamlit Cloud η SQLite μπορεί να χαθεί σε reboot/redeploy. "
-                "Για 100% μόνιμη αποθήκευση βάλε Postgres/Supabase (DATABASE_URL)."
-            )
-        else:
-            st.sidebar.info(
-                "Σημείωση: Η SQLite είναι τοπικό αρχείο. Για μόνιμη αποθήκευση/πολλαπλούς χρήστες προτίμησε Postgres/Supabase (DATABASE_URL)."
-            )
-except Exception:
-    pass
 st.sidebar.divider()
 
 st.sidebar.markdown("<div style='font-weight:700; color:#0b2b4c; margin:0.25rem 0 0.5rem 0;'>Μενού</div>", unsafe_allow_html=True)
@@ -1074,18 +1052,7 @@ elif theme_option == "Φωτεινό" and st.session_state.theme == 'dark':
     st.session_state.theme = 'light'
     st.rerun()
 
-# Keyboard shortcuts help
-with st.sidebar.expander("⌨️ Συντομεύσεις Πληκτρολογίου", expanded=False):
-    st.markdown("""
-    **📝 Νέα Εγγραφή:**
-    - `Ctrl + S`: Αποθήκευση
-    
-    **🔍 Αναζήτηση:**
-    - `Ctrl + F`: Εστίαση στο πεδίο αναζήτησης
-    
-    **🧭 Πλοήγηση:**
-    - `Alt + 1-7`: Άμεση μετάβαση στο μενού
-    """)
+ 
 
 # --- DASHBOARD ---
 if menu == "Dashboard":
@@ -2647,8 +2614,26 @@ elif menu == "Ρυθμίσεις GL":
     # --- TAB 5: SYSTEM ---
     with tab_system:
         st.subheader("⚙️ Ρυθμίσεις Συστήματος")
+
+        st.write("**Πληροφορίες Χρήστη:**")
+        st.code(f"Συνδεδεμένος χρήστης: {st.session_state.username}")
         
         st.write("**Πληροφορίες Βάσης Δεδομένων:**")
+
+        try:
+            if DB_DIALECT == "postgres":
+                d = _safe_db_diagnostics()
+                host = d.get("host", "")
+                dbn = d.get("db", "")
+                sslmode = d.get("sslmode", "")
+                st.code(f"Βάση: Postgres (Supabase)\nHost: {host}\nDB: {dbn}\nsslmode: {sslmode}")
+            else:
+                st.code(f"Βάση: SQLite\nDB file: {DB_FILE}")
+                st.warning(
+                    "SQLite είναι τοπικό αρχείο. Για 100% μόνιμη αποθήκευση (ειδικά σε Streamlit Cloud) χρησιμοποίησε Postgres/Supabase μέσω `DATABASE_URL`."
+                )
+        except Exception:
+            pass
         
         # Get database statistics
         total_records = int(db_scalar("SELECT COUNT(*) FROM journal", default=0))
@@ -2657,6 +2642,20 @@ elif menu == "Ρυθμίσεις GL":
         stat1, stat2 = st.columns(2)
         stat1.metric("📝 Σύνολο Εγγραφών", f"{total_records}")
         stat2.metric("📚 GL Codes", f"{gl_count}")
+
+        st.divider()
+
+        with st.expander("⌨️ Συντομεύσεις Πληκτρολογίου", expanded=False):
+            st.markdown("""
+            **📝 Νέα Εγγραφή:**
+            - `Ctrl + S`: Αποθήκευση
+            
+            **🔍 Αναζήτηση:**
+            - `Ctrl + F`: Εστίαση στο πεδίο αναζήτησης
+            
+            **🧭 Πλοήγηση:**
+            - `Alt + 1-7`: Άμεση μετάβαση στο μενού
+            """)
         
         st.divider()
         
