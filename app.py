@@ -2283,74 +2283,113 @@ elif menu == "Αρχείο & Διορθώσεις":
         
         else:
             # ΛΕΠΤΟΜΕΡΕΙΕΣ
-            focus_id = st.session_state.get("arch_focus_id")
-            rows_iter = df_filtered.itertuples(index=False)
+            # Always edit ONE record at a time.
+            focus_id = st.session_state.pop("arch_focus_id", None)
+            ids = [int(x) for x in df_filtered["id"].astype(int).tolist()] if not df_filtered.empty else []
+            if not ids:
+                st.warning("⚠️ Δεν βρέθηκαν εγγραφές για εμφάνιση")
+                st.stop()
+
+            # Pick default id: clicked one -> existing selector value -> first
+            default_id = None
             if focus_id is not None:
                 try:
-                    focus_id_int = int(focus_id)
-                    rows_iter = df_filtered[df_filtered["id"] == focus_id_int].itertuples(index=False)
+                    fid = int(focus_id)
+                    if fid in ids:
+                        default_id = fid
                 except Exception:
                     pass
+            if default_id is None:
+                try:
+                    current_sel = int(st.session_state.get("arch_detail_id"))
+                    if current_sel in ids:
+                        default_id = current_sel
+                except Exception:
+                    pass
+            if default_id is None:
+                default_id = ids[0]
 
-            for row in rows_iter:
-                rid = int(row.id)
-                ddate = row.doc_date.strftime('%d/%m/%Y')
-                cparty = row.counterparty if row.counterparty else '—'
+            # Nice label per id
+            label_by_id = {}
+            try:
+                tmp = df_filtered.copy()
+                tmp["doc_date"] = pd.to_datetime(tmp["doc_date"], errors="coerce")
+                for r in tmp.itertuples(index=False):
+                    rid0 = int(r.id)
+                    d = r.doc_date.strftime('%d/%m/%Y') if hasattr(r.doc_date, "strftime") and pd.notna(r.doc_date) else "—"
+                    cp = r.counterparty if getattr(r, "counterparty", None) else "—"
+                    amt = float(getattr(r, "amount_gross", 0.0) or 0.0)
+                    label_by_id[rid0] = f"#{rid0} • {d} • {cp} • €{amt:,.2f}"
+            except Exception:
+                pass
+
+            selected_id = st.selectbox(
+                "Επιλογή Εγγραφής",
+                options=ids,
+                index=ids.index(default_id),
+                format_func=lambda x: label_by_id.get(int(x), f"#{int(x)}"),
+                key="arch_detail_id",
+            )
+
+            row = next(df_filtered[df_filtered["id"].astype(int) == int(selected_id)].itertuples(index=False))
+            rid = int(row.id)
+            ddate = row.doc_date.strftime('%d/%m/%Y')
+            cparty = row.counterparty if row.counterparty else '—'
+            
+            with st.container(border=True):
+                st.markdown(f"### #{rid} - {cparty}")
                 
-                with st.container(border=True):
-                    st.markdown(f"### #{rid} - {cparty}")
-                    
-                    # Display current values
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.write(f"**Ημ/νία:** {ddate}")
-                        st.write(f"**Τύπος:** {row.doc_type}")
-                    with col2:
-                        st.write(f"**Αρ. Παρ/κου:** {row.doc_no if row.doc_no else '—'}")
-                        st.write(f"**Κατάσταση:** {row.status}")
-                    with col3:
-                        st.write(f"**Καθαρό:** €{row.amount_net:,.2f}")
-                        st.write(f"**Σύνολο:** €{row.amount_gross:,.2f}")
-                    
-                    st.write(f"**Περιγραφή:** {row.description if row.description else '—'}")
-                    
-                    st.divider()
-                    st.subheader("Διόρθωση")
-                    
-                    # Edit form
-                    f1, f2, f3 = st.columns(3)
-                    
-                    types = ["Income", "Expense", "Bill", "Transfer", "Cash Withdrawal", "Cash Deposit", "Bank Operation"]
-                    if row.doc_type not in types:
-                        types.append(row.doc_type)
-                    
-                    with f1:
-                        new_date = st.date_input("Ημερομηνία", value=row.doc_date, key=f"ed_dt_{rid}")
-                        new_type = st.selectbox("Τύπος", types, index=types.index(row.doc_type), key=f"ed_tp_{rid}")
-                        new_partner = st.text_input("Συναλλασσόμενος", value=row.counterparty, key=f"ed_cp_{rid}")
-                    
-                    with f2:
-                        new_docno = st.text_input("Αρ. Παρ/κου", value=row.doc_no, key=f"ed_dn_{rid}")
-                        new_descr = st.text_input("Περιγραφή", value=row.description, key=f"ed_dc_{rid}")
-                        pays = ["Τράπεζα", "Μετρητά", "Επί Πιστώσει"]
-                        cur_pay = row.payment_method if row.payment_method in pays else pays[0]
-                        new_pay = st.selectbox("Πληρωμή", pays, index=pays.index(cur_pay), key=f"ed_py_{rid}")
-                        bank_accounts = load_bank_accounts()
-                        cur_bank = str(row.bank_account or "").strip()
-                        bank_opts = ["(Κενό)", "(Νέος Λογαριασμός)"] + bank_accounts
-                        if cur_bank and cur_bank in bank_accounts:
-                            bank_idx = bank_opts.index(cur_bank)
-                        elif not cur_bank:
-                            bank_idx = 0
-                        else:
-                            bank_idx = 1
-                        sel_bank = st.selectbox("Λογαριασμός", bank_opts, index=bank_idx, key=f"ed_ba_sel_{rid}")
-                        if sel_bank == "(Κενό)":
-                            new_bank = ""
-                        elif sel_bank == "(Νέος Λογαριασμός)":
-                            new_bank = st.text_input("Νέος Λογαριασμός", value=cur_bank, key=f"ed_ba_new_{rid}")
-                        else:
-                            new_bank = sel_bank
+                # Display current values
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.write(f"**Ημ/νία:** {ddate}")
+                    st.write(f"**Τύπος:** {row.doc_type}")
+                with col2:
+                    st.write(f"**Αρ. Παρ/κου:** {row.doc_no if row.doc_no else '—'}")
+                    st.write(f"**Κατάσταση:** {row.status}")
+                with col3:
+                    st.write(f"**Καθαρό:** €{row.amount_net:,.2f}")
+                    st.write(f"**Σύνολο:** €{row.amount_gross:,.2f}")
+                
+                st.write(f"**Περιγραφή:** {row.description if row.description else '—'}")
+                
+                st.divider()
+                st.subheader("Διόρθωση")
+                
+                # Edit form
+                f1, f2, f3 = st.columns(3)
+
+                types = ["Income", "Expense", "Bill", "Transfer", "Cash Withdrawal", "Cash Deposit", "Bank Operation"]
+                if row.doc_type not in types:
+                    types.append(row.doc_type)
+
+                with f1:
+                    new_date = st.date_input("Ημερομηνία", value=row.doc_date, key=f"ed_dt_{rid}")
+                    new_type = st.selectbox("Τύπος", types, index=types.index(row.doc_type), key=f"ed_tp_{rid}")
+                    new_partner = st.text_input("Συναλλασσόμενος", value=row.counterparty, key=f"ed_cp_{rid}")
+
+                with f2:
+                    new_docno = st.text_input("Αρ. Παρ/κου", value=row.doc_no, key=f"ed_dn_{rid}")
+                    new_descr = st.text_input("Περιγραφή", value=row.description, key=f"ed_dc_{rid}")
+                    pays = ["Τράπεζα", "Μετρητά", "Επί Πιστώσει"]
+                    cur_pay = row.payment_method if row.payment_method in pays else pays[0]
+                    new_pay = st.selectbox("Πληρωμή", pays, index=pays.index(cur_pay), key=f"ed_py_{rid}")
+                    bank_accounts = load_bank_accounts()
+                    cur_bank = str(row.bank_account or "").strip()
+                    bank_opts = ["(Κενό)", "(Νέος Λογαριασμός)"] + bank_accounts
+                    if cur_bank and cur_bank in bank_accounts:
+                        bank_idx = bank_opts.index(cur_bank)
+                    elif not cur_bank:
+                        bank_idx = 0
+                    else:
+                        bank_idx = 1
+                    sel_bank = st.selectbox("Λογαριασμός", bank_opts, index=bank_idx, key=f"ed_ba_sel_{rid}")
+                    if sel_bank == "(Κενό)":
+                        new_bank = ""
+                    elif sel_bank == "(Νέος Λογαριασμός)":
+                        new_bank = st.text_input("Νέος Λογαριασμός", value=cur_bank, key=f"ed_ba_new_{rid}")
+                    else:
+                        new_bank = sel_bank
                     
                     with f3:
                         new_net = st.number_input("Καθαρό €", value=float(row.amount_net), key=f"ed_net_{rid}")
@@ -2449,6 +2488,7 @@ elif menu == "Αρχείο & Διορθώσεις":
                                 db_execute("DELETE FROM journal WHERE id = :id", {"id": rid})
                                 st.cache_data.clear()  # Clear cache after delete
                                 st.session_state.pop("arch_focus_id", None)
+                                st.session_state.pop("arch_detail_id", None)
                                 st.error("✗ Διαγράφηκε!")
                                 time.sleep(0.3)
                                 st.rerun()
