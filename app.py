@@ -2044,7 +2044,11 @@ elif menu == "ΦΠΑ & Φόροι (Report)":
 elif menu == "Καρτέλες (Ledgers)":
     st.title("📇 Καρτέλες Συναλλασσομένων")
 
-    partners = load_counterparties(None)
+    partners_df = pd.read_sql_query(
+        text("SELECT DISTINCT counterparty FROM journal WHERE counterparty IS NOT NULL AND counterparty != ''"),
+        ENGINE,
+    )
+    partners = sorted(partners_df['counterparty'].tolist())
     
     if not partners:
         st.warning("⚠️ Δεν υπάρχουν καταχωρημένοι συναλλασσόμενοι")
@@ -2055,11 +2059,12 @@ elif menu == "Καρτέλες (Ledgers)":
     sel = st.selectbox("Επιλογή Συναλλασσόμενου", partners, help="Επιλέξτε τον συναλλασσόμενο για να δείτε τις συναλλαγές του")
     
     if sel:
-        df_all = load_journal_data()
-        counterparty_series = df_all["counterparty"].fillna("").astype(str).str.strip()
-        sel_norm = str(sel).strip().casefold()
-        mask = counterparty_series.str.casefold() == sel_norm
-        df = df_all[mask].copy()
+        df = pd.read_sql_query(
+            text("SELECT * FROM journal WHERE counterparty = :counterparty ORDER BY doc_date DESC"),
+            ENGINE,
+            params={"counterparty": sel},
+        )
+        
         if df.empty:
             st.warning("⚠️ Δεν υπάρχουν συναλλαγές για τον επιλεγμένο συναλλασσόμενο")
             st.stop()
@@ -2082,29 +2087,21 @@ elif menu == "Καρτέλες (Ledgers)":
             end_date = st.date_input("Ως", value=end_default, help="Ημερομηνία λήξης")
         
         with col3:
-            doc_types = (
-                df['doc_type']
-                .fillna("")
-                .astype(str)
-                .str.strip()
-            )
-            doc_type_options = sorted(
-                {t for t in doc_types.unique() if t and t.casefold() not in {"nan", "none", "<na>"}},
+            doc_types_in_data = sorted(
+                {str(t).strip() for t in df['doc_type'].dropna().unique()
+                 if str(t).strip() and str(t).strip().casefold() not in {"nan", "none", "<na>"}},
                 key=str.casefold,
             )
-            base_types = ["Income", "Expense", "Bill", "Transfer"]
-            for t in base_types:
-                if t not in doc_type_options:
-                    doc_type_options.append(t)
-            doc_type_options = sorted(set(doc_type_options), key=str.casefold)
+            if not doc_types_in_data:
+                doc_types_in_data = ["Income", "Expense", "Bill", "Transfer"]
             doc_type_filter = st.multiselect(
                 "Τύπος Συναλλαγής",
-                doc_type_options,
-                default=doc_type_options,
+                doc_types_in_data,
+                default=doc_types_in_data,
                 help="Επιλέξτε τύπους συναλλαγών προς εμφάνιση",
             )
         
-        # Apply date filter
+        # Apply filters
         if has_dates:
             mask = (df['doc_date'].dt.date >= start_date) & (df['doc_date'].dt.date <= end_date)
         else:
