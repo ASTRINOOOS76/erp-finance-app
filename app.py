@@ -2068,7 +2068,7 @@ elif menu == "Καρτέλες (Ledgers)":
         df['doc_date'] = pd.to_datetime(df['doc_date'], errors='coerce')
         df = clean_dataframe(df)
         
-        # Date filters
+        # Date and type filters
         has_dates = df['doc_date'].notna().any()
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -2076,24 +2076,30 @@ elif menu == "Καρτέλες (Ledgers)":
                 min_date = df['doc_date'].min()
                 start_default = date.today() if pd.isna(min_date) else min_date.date()
                 start_date = st.date_input("Από", value=start_default, help="Ημερομηνία έναρξης")
-            else:
-                st.caption("Δεν υπάρχουν έγκυρες ημερομηνίες")
-                start_date = date.today()
         
         with col2:
             if has_dates:
                 max_date = df['doc_date'].max()
                 end_default = date.today() if pd.isna(max_date) else max_date.date()
                 end_date = st.date_input("Ως", value=end_default, help="Ημερομηνία λήξης")
-            else:
-                st.caption("-")
-                end_date = date.today()
         
         with col3:
-            doc_type_filter = st.multiselect("Τύπος Συναλλαγής", 
-                                            ["Income", "Expense", "Bill", "Transfer"], 
-                                            default=["Income", "Expense", "Bill"],
-                                            help="Επιλέξτε τύπους συναλλαγών προς εμφάνιση")
+            doc_types = (
+                df['doc_type']
+                .fillna("")
+                .astype(str)
+                .str.strip()
+            )
+            doc_type_options = sorted(
+                {t for t in doc_types.unique() if t and t.casefold() not in {"nan", "none", "<na>"}},
+                key=str.casefold,
+            )
+            doc_type_filter = st.multiselect(
+                "Τύπος Συναλλαγής",
+                doc_type_options,
+                default=doc_type_options,
+                help="Επιλέξτε τύπους συναλλαγών προς εμφάνιση",
+            )
         
         # Apply date filter
         if has_dates:
