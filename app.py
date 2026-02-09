@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import sqlite3
 import plotly.express as px
 import os
 import time
@@ -966,33 +965,35 @@ def calculate_vat():
 @st.cache_data
 def load_gl_codes():
     """Load GL codes with caching (rarely changes)"""
-    gl_df = pd.read_sql_query("SELECT code, description FROM gl_codes ORDER BY code", ENGINE)
+    gl_df = pd.read_sql_query(text("SELECT code, description FROM gl_codes ORDER BY code"), ENGINE)
     return gl_df.apply(lambda x: f"{x['code']} - {x['description']}", axis=1).tolist()
 
 @st.cache_data(ttl=300)  # Cache for 5 minutes
 def load_journal_data():
     """Load journal data with short-term caching"""
-    return pd.read_sql_query("SELECT * FROM journal", ENGINE)
+    return pd.read_sql_query(text("SELECT * FROM journal"), ENGINE)
 
 
 @st.cache_data(ttl=300)
 def load_counterparties(doc_types: Optional[tuple[str, ...]] = None) -> list[str]:
     """Load distinct counterparties, optionally filtered by doc_type."""
-    # From journal
+    # From journal — use parameterized query to prevent SQL injection
     base = (
         "SELECT DISTINCT counterparty AS name "
         "FROM journal "
         "WHERE counterparty IS NOT NULL AND counterparty != ''"
     )
+    params: Dict[str, Any] = {}
     if doc_types:
-        types_sql = ", ".join([f"'{t}'" for t in doc_types])
-        sql_j = f"{base} AND doc_type IN ({types_sql})"
+        placeholders = ", ".join([f":dt{i}" for i in range(len(doc_types))])
+        sql_j = f"{base} AND doc_type IN ({placeholders})"
+        for i, dt in enumerate(doc_types):
+            params[f"dt{i}"] = dt
     else:
         sql_j = base
 
     # From lookup table (filtered by inferred kind when doc_types provided)
     kind_filter_sql = ""
-    params: Dict[str, Any] = {}
     if doc_types:
         kinds = {_counterparty_kind_for_doc_type(t) for t in doc_types}
         # Only narrow when the inferred kinds are meaningful
@@ -1256,12 +1257,31 @@ if count == 0:
     st.stop()
 
 # --- 6. AUTH ---
+# Credentials: prefer st.secrets or env vars; fall back to defaults for dev only.
+def _get_valid_users() -> dict:
+    """Return {username: password} from secrets/env or hardcoded defaults."""
+    try:
+        users = st.secrets.get("users", None)
+        if users:
+            return dict(users)
+    except Exception:
+        pass
+    env_admin = os.getenv("ERP_ADMIN_PASS", "admin123")
+    env_user = os.getenv("ERP_USER_PASS", "1234")
+    return {"admin": env_admin, "user": env_user}
+
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
 if not st.session_state.logged_in:
     st.title("🔐 Login")
     u = st.text_input("User"); p = st.text_input("Pass", type="password")
     if st.button("Enter"):
-        if (u=="admin" and p=="admin123") or (u=="user" and p=="1234"): st.session_state.logged_in=True; st.session_state.username=u; st.rerun()
+        valid_users = _get_valid_users()
+        if u in valid_users and p == valid_users[u]:
+            st.session_state.logged_in = True
+            st.session_state.username = u
+            st.rerun()
+        else:
+            st.error("❌ Λάθος στοιχεία")
     st.stop()
 
 # --- 7. MAIN APP ---
@@ -1388,14 +1408,16 @@ if menu == "Dashboard":
     st.subheader("📋 Τελευταίες Εγγραφές")
     
     df_display = df.copy()
-    df_display['doc_date'] = df_display['doc_date'].dt.strftime('%d/%m/%Y')
     
     # Ensure amounts are clean
     for col in ['amount_net', 'vat_amount', 'amount_gross']:
         df_display[col] = pd.to_numeric(df_display[col], errors='coerce').fillna(0.0)
     
-    # Sort by date descending and show last 20
+    # Sort by date descending BEFORE formatting, then show last 20
     df_display = df_display.sort_values('doc_date', ascending=False).head(20)
+    
+    # Format date for display AFTER sorting
+    df_display['doc_date'] = df_display['doc_date'].dt.strftime('%d/%m/%Y')
     
     # Select columns to display
     display_cols = ['doc_date', 'doc_no', 'doc_type', 'counterparty', 'description', 'amount_net', 'vat_amount', 'amount_gross', 'payment_method', 'status']
@@ -1650,8 +1672,11 @@ elif menu == "Νέα Εγγραφή":
             st.subheader("💳 Μεταφορά Ποσού μεταξύ Λογαριασμών")
             partner = st.text_input("Περιγραφή", "Μεταφορά χρημάτων")
             
-            from_acc = st.selectbox("Από Λογαριασμό", ["Ταμείο", "Alpha Bank", "Piraeus Bank", "Gamma Bank"])
-            to_acc = st.selectbox("Προς Λογαριασμό", ["Ταμείο", "Alpha Bank", "Piraeus Bank", "Gamma Bank"])
+            transfer_accounts = load_bank_accounts()
+            if not transfer_accounts:
+                transfer_accounts = ["Ταμείο"]
+            from_acc = st.selectbox("Από Λογαριασμό", transfer_accounts, key="transfer_from")
+            to_acc = st.selectbox("Προς Λογαριασμό", transfer_accounts, key="transfer_to")
             
             descr = f"Μεταφορά από {from_acc} σε {to_acc}"
             
@@ -1824,9 +1849,10 @@ elif menu == "Νέα Εγγραφή":
                         vat_amount = float(st.session_state.calc_vat_val)
                         gross_amount = float(st.session_state.calc_gross)
                     else:
-                        net_amount = 0.0
+                        # For transfers, withdrawals, deposits etc: use entered amount as both net and gross
+                        net_amount = float(st.session_state.calc_net) if st.session_state.calc_net else 0.0
                         vat_amount = 0.0
-                        gross_amount = float(st.session_state.calc_net) if st.session_state.calc_net else 0.0
+                        gross_amount = net_amount
                     
                     gl_val = gl_choice.split(" - ")[0] if gl_choice else "999"
                     doc_date_iso = d_date.strftime('%Y-%m-%d') if hasattr(d_date, 'strftime') else str(d_date)
@@ -2220,18 +2246,20 @@ elif menu == "Αρχείο & Διορθώσεις":
         with col1:
             st.markdown("**Από Ημερομηνία**")
             st.caption("Επιλέξτε την αρχική ημερομηνία για φιλτράρισμα")
+            _min_d = df['doc_date'].min()
             date_from = st.date_input(
                 "Από Ημερομηνία",
-                value=df['doc_date'].min().date() if not df.empty else date.today(),
+                value=date.today() if (df.empty or pd.isna(_min_d)) else _min_d.date(),
                 key="arch_date_from",
             )
 
         with col2:
             st.markdown("**Έως Ημερομηνία**")
             st.caption("Επιλέξτε την τελική ημερομηνία για φιλτράρισμα")
+            _max_d = df['doc_date'].max()
             date_to = st.date_input(
                 "Έως Ημερομηνία",
-                value=df['doc_date'].max().date() if not df.empty else date.today(),
+                value=date.today() if (df.empty or pd.isna(_max_d)) else _max_d.date(),
                 key="arch_date_to",
             )
 
@@ -2257,8 +2285,10 @@ elif menu == "Αρχείο & Διορθώσεις":
                 key="arch_amount_max",
             )
     else:
-        date_from = df['doc_date'].min().date() if not df.empty else date.today()
-        date_to = df['doc_date'].max().date() if not df.empty else date.today()
+        _min_d = df['doc_date'].min() if not df.empty else pd.NaT
+        _max_d = df['doc_date'].max() if not df.empty else pd.NaT
+        date_from = date.today() if pd.isna(_min_d) else _min_d.date()
+        date_to = date.today() if pd.isna(_max_d) else _max_d.date()
         amount_min = 0.0
         amount_max = float(df['amount_gross'].max()) if not df.empty else 10000.0
     
@@ -2332,8 +2362,18 @@ elif menu == "Αρχείο & Διορθώσεις":
         st.divider()
         
         if display_mode == "Λίστα":
-            # ΑΠΛΗ ΛΙΣΤΑ
-            for row in df_filtered.itertuples(index=False):
+            # ΑΠΛΗ ΛΙΣΤΑ with pagination
+            PAGE_SIZE = 20
+            total_pages = max(1, (len(df_filtered) + PAGE_SIZE - 1) // PAGE_SIZE)
+            if "arch_page" not in st.session_state:
+                st.session_state.arch_page = 0
+            st.session_state.arch_page = min(st.session_state.arch_page, total_pages - 1)
+            
+            start_idx = st.session_state.arch_page * PAGE_SIZE
+            end_idx = min(start_idx + PAGE_SIZE, len(df_filtered))
+            page_df = df_filtered.iloc[start_idx:end_idx]
+            
+            for row in page_df.itertuples(index=False):
                 rid = int(row.id)
                 ddate = row.doc_date.strftime('%d/%m/%Y')
                 cparty = row.counterparty if row.counterparty else '—'
@@ -2363,6 +2403,21 @@ elif menu == "Αρχείο & Διορθώσεις":
                             st.rerun()
                     with col_id:
                         st.caption(f"#{rid}")
+            
+            # Pagination controls
+            if total_pages > 1:
+                st.divider()
+                pg_prev, pg_info, pg_next = st.columns([1, 2, 1])
+                with pg_prev:
+                    if st.button("⬅️ Προηγούμενη", disabled=(st.session_state.arch_page == 0), key="arch_pg_prev"):
+                        st.session_state.arch_page -= 1
+                        st.rerun()
+                with pg_info:
+                    st.markdown(f"<div style='text-align:center'>Σελίδα {st.session_state.arch_page + 1} / {total_pages}</div>", unsafe_allow_html=True)
+                with pg_next:
+                    if st.button("Επόμενη ➡️", disabled=(st.session_state.arch_page >= total_pages - 1), key="arch_pg_next"):
+                        st.session_state.arch_page += 1
+                        st.rerun()
         
         else:
             # ΛΕΠΤΟΜΕΡΕΙΕΣ
@@ -2473,110 +2528,110 @@ elif menu == "Αρχείο & Διορθώσεις":
                         new_bank = st.text_input("Νέος Λογαριασμός", value=cur_bank, key=f"ed_ba_new_{rid}")
                     else:
                         new_bank = sel_bank
-                    
-                    with f3:
-                        new_net = st.number_input("Καθαρό €", value=float(row.amount_net), key=f"ed_net_{rid}")
-                        vat_r = 24
-                        if row.amount_net > 0 and row.vat_amount > 0:
-                            vat_r = int(row.vat_amount / row.amount_net * 100)
-                        vat_r = max(0, min(vat_r, 24))
-                        new_vat_rate = st.selectbox("ΦΠΑ %", [24, 13, 6, 0], 
-                                                   index=[24, 13, 6, 0].index(vat_r) if vat_r in [24, 13, 6, 0] else 0, 
-                                                   key=f"ed_vr_{rid}")
-                        stats = ["Paid", "Unpaid"]
-                        new_stat = st.selectbox("Κατάσταση", stats, 
-                                               index=stats.index(row.status) if row.status in stats else 1,
-                                               key=f"ed_st_{rid}")
-                        gl_list = load_gl_codes()
-                        cur_gl = str(row.gl_code or "").strip()
-                        gl_opts = gl_list if gl_list else ["999"]
-                        # Map stored code to display option
-                        gl_display = cur_gl
-                        if cur_gl:
-                            for opt in gl_opts:
-                                if str(opt).split(" - ")[0] == cur_gl:
-                                    gl_display = opt
-                                    break
-                        if gl_display in gl_opts:
-                            gl_idx = gl_opts.index(gl_display)
+                
+                with f3:
+                    new_net = st.number_input("Καθαρό €", value=float(row.amount_net), key=f"ed_net_{rid}")
+                    vat_r = 24
+                    if row.amount_net > 0 and row.vat_amount > 0:
+                        vat_r = int(row.vat_amount / row.amount_net * 100)
+                    vat_r = max(0, min(vat_r, 24))
+                    new_vat_rate = st.selectbox("ΦΠΑ %", [24, 13, 6, 0], 
+                                               index=[24, 13, 6, 0].index(vat_r) if vat_r in [24, 13, 6, 0] else 0, 
+                                               key=f"ed_vr_{rid}")
+                    stats = ["Paid", "Unpaid"]
+                    new_stat = st.selectbox("Κατάσταση", stats, 
+                                           index=stats.index(row.status) if row.status in stats else 1,
+                                           key=f"ed_st_{rid}")
+                    gl_list = load_gl_codes()
+                    cur_gl = str(row.gl_code or "").strip()
+                    gl_opts = gl_list if gl_list else ["999"]
+                    # Map stored code to display option
+                    gl_display = cur_gl
+                    if cur_gl:
+                        for opt in gl_opts:
+                            if str(opt).split(" - ")[0] == cur_gl:
+                                gl_display = opt
+                                break
+                    if gl_display in gl_opts:
+                        gl_idx = gl_opts.index(gl_display)
+                    else:
+                        gl_idx = 0
+                    new_gl_choice = st.selectbox("GL", gl_opts, index=gl_idx, key=f"ed_gl_{rid}")
+                    new_gl = str(new_gl_choice).split(" - ")[0] if new_gl_choice else "999"
+                
+                new_vat = round(new_net * (new_vat_rate / 100), 2)
+                new_gross = round(new_net + new_vat, 2)
+                st.info(f"ΦΠΑ: €{new_vat:,.2f} | Σύνολο: €{new_gross:,.2f}")
+                
+                st.divider()
+                
+                col_upd, col_del = st.columns(2)
+                with col_upd:
+                    if st.button("Ενημέρωση", key=f"det_upd_{rid}", width='stretch', type="primary"):
+                        # Validate updated data
+                        upd_data = {
+                            'partner': new_partner,
+                            'description': new_descr,
+                            'amount_net': new_net,
+                            'vat_amount': new_vat,
+                            'amount_gross': new_gross
+                        }
+                        upd_errors = validate_transaction_input(upd_data)
+                        if upd_errors:
+                            for error in upd_errors:
+                                st.error(f"❌ {error}")
                         else:
-                            gl_idx = 0
-                        new_gl_choice = st.selectbox("GL", gl_opts, index=gl_idx, key=f"ed_gl_{rid}")
-                        new_gl = str(new_gl_choice).split(" - ")[0] if new_gl_choice else "999"
-                    
-                    new_vat = round(new_net * (new_vat_rate / 100), 2)
-                    new_gross = round(new_net + new_vat, 2)
-                    st.info(f"ΦΠΑ: €{new_vat:,.2f} | Σύνολο: €{new_gross:,.2f}")
-                    
-                    st.divider()
-                    
-                    col_upd, col_del = st.columns(2)
-                    with col_upd:
-                        if st.button("Ενημέρωση", key=f"det_upd_{rid}", width='stretch', type="primary"):
-                            # Validate updated data
-                            upd_data = {
-                                'partner': new_partner,
-                                'description': new_descr,
-                                'amount_net': new_net,
-                                'vat_amount': new_vat,
-                                'amount_gross': new_gross
-                            }
-                            upd_errors = validate_transaction_input(upd_data)
-                            if upd_errors:
-                                for error in upd_errors:
-                                    st.error(f"❌ {error}")
-                            else:
-                                try:
-                                    db_execute(
-                                        """UPDATE journal SET
-                                                doc_date = :doc_date,
-                                                doc_no = :doc_no,
-                                                doc_type = :doc_type,
-                                                counterparty = :counterparty,
-                                                description = :description,
-                                                gl_code = :gl_code,
-                                                amount_net = :amount_net,
-                                                vat_amount = :vat_amount,
-                                                amount_gross = :amount_gross,
-                                                payment_method = :payment_method,
-                                                bank_account = :bank_account,
-                                                status = :status
-                                            WHERE id = :id""",
-                                        {
-                                            "doc_date": new_date.strftime('%Y-%m-%d') if hasattr(new_date, 'strftime') else str(new_date),
-                                            "doc_no": new_docno,
-                                            "doc_type": new_type,
-                                            "counterparty": new_partner,
-                                            "description": new_descr,
-                                            "gl_code": new_gl,
-                                            "amount_net": float(new_net),
-                                            "vat_amount": float(new_vat),
-                                            "amount_gross": float(new_gross),
-                                            "payment_method": new_pay,
-                                            "bank_account": new_bank,
-                                            "status": new_stat,
-                                            "id": rid,
-                                        },
-                                    )
-                                    st.cache_data.clear()  # Clear cache after update
-                                    st.session_state.pop("arch_focus_id", None)
-                                    st.success("✓ Ενημερώθηκε!")
-                                    time.sleep(0.3)
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"❌ Σφάλμα κατά την ενημέρωση: {str(e)}")
-                    with col_del:
-                        if st.button("Διαγραφή", key=f"det_del_{rid}", width='stretch', type="secondary"):
                             try:
-                                db_execute("DELETE FROM journal WHERE id = :id", {"id": rid})
-                                st.cache_data.clear()  # Clear cache after delete
+                                db_execute(
+                                    """UPDATE journal SET
+                                            doc_date = :doc_date,
+                                            doc_no = :doc_no,
+                                            doc_type = :doc_type,
+                                            counterparty = :counterparty,
+                                            description = :description,
+                                            gl_code = :gl_code,
+                                            amount_net = :amount_net,
+                                            vat_amount = :vat_amount,
+                                            amount_gross = :amount_gross,
+                                            payment_method = :payment_method,
+                                            bank_account = :bank_account,
+                                            status = :status
+                                        WHERE id = :id""",
+                                    {
+                                        "doc_date": new_date.strftime('%Y-%m-%d') if hasattr(new_date, 'strftime') else str(new_date),
+                                        "doc_no": new_docno,
+                                        "doc_type": new_type,
+                                        "counterparty": new_partner,
+                                        "description": new_descr,
+                                        "gl_code": new_gl,
+                                        "amount_net": float(new_net),
+                                        "vat_amount": float(new_vat),
+                                        "amount_gross": float(new_gross),
+                                        "payment_method": new_pay,
+                                        "bank_account": new_bank,
+                                        "status": new_stat,
+                                        "id": rid,
+                                    },
+                                )
+                                st.cache_data.clear()  # Clear cache after update
                                 st.session_state.pop("arch_focus_id", None)
-                                st.session_state.pop("arch_detail_id", None)
-                                st.error("✗ Διαγράφηκε!")
+                                st.success("✓ Ενημερώθηκε!")
                                 time.sleep(0.3)
                                 st.rerun()
                             except Exception as e:
-                                st.error(f"❌ Σφάλμα κατά τη διαγραφή: {str(e)}")
+                                st.error(f"❌ Σφάλμα κατά την ενημέρωση: {str(e)}")
+                with col_del:
+                    if st.button("Διαγραφή", key=f"det_del_{rid}", width='stretch', type="secondary"):
+                        try:
+                            db_execute("DELETE FROM journal WHERE id = :id", {"id": rid})
+                            st.cache_data.clear()  # Clear cache after delete
+                            st.session_state.pop("arch_focus_id", None)
+                            st.session_state.pop("arch_detail_id", None)
+                            st.error("✗ Διαγράφηκε!")
+                            time.sleep(0.3)
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Σφάλμα κατά τη διαγραφή: {str(e)}")
 
 # --- TREASURY ---
 elif menu == "Ταμείο & Τράπεζες":
@@ -2776,7 +2831,7 @@ elif menu == "Ρυθμίσεις GL":
         st.subheader("📚 Λογαριασμοί GL (Γενικό Καθολικό)")
         
         # Load GL codes
-        df_gl = pd.read_sql_query("SELECT * FROM gl_codes ORDER BY code", ENGINE)
+        df_gl = pd.read_sql_query(text("SELECT * FROM gl_codes ORDER BY code"), ENGINE)
         df_gl['code'] = df_gl['code'].astype(str)
         
         # Show current GL codes
@@ -2836,7 +2891,7 @@ elif menu == "Ρυθμίσεις GL":
     with tab_customers:
         st.subheader("👥 Διαχείριση Πελατών")
         df_customers = pd.read_sql_query(
-            "SELECT name FROM counterparties WHERE kind = 'customer' ORDER BY name",
+            text("SELECT name FROM counterparties WHERE kind = 'customer' ORDER BY name"),
             ENGINE,
         )
         customers = df_customers["name"].tolist() if not df_customers.empty else []
@@ -2919,7 +2974,7 @@ elif menu == "Ρυθμίσεις GL":
     with tab_suppliers:
         st.subheader("🏭 Διαχείριση Προμηθευτών")
         df_suppliers = pd.read_sql_query(
-            "SELECT name FROM counterparties WHERE kind = 'supplier' ORDER BY name",
+            text("SELECT name FROM counterparties WHERE kind = 'supplier' ORDER BY name"),
             ENGINE,
         )
         suppliers = df_suppliers["name"].tolist() if not df_suppliers.empty else []
@@ -3002,7 +3057,7 @@ elif menu == "Ρυθμίσεις GL":
     with tab_banks:
         st.subheader("🏦 Διαχείριση Τραπεζικών Λογαριασμών")
         df_accounts = pd.read_sql_query(
-            "SELECT name, kind FROM bank_accounts ORDER BY name",
+            text("SELECT name, kind FROM bank_accounts ORDER BY name"),
             ENGINE,
         )
         accounts = df_accounts["name"].tolist() if not df_accounts.empty else []
@@ -3146,29 +3201,47 @@ elif menu == "Ρυθμίσεις GL":
         
         st.write("**Δράσεις Διαχείρισης:**")
         
-        # Database reset
+        # Database reset — use session_state for two-step confirmation
         st.warning("⚠️ **Επικίνδυνες Λειτουργίες** (χρησιμοποιήστε με προσοχή)")
         
-        if st.button("Διαγραφή ΌΛΩΝ των δεδομένων (Reset DB)", width='stretch', type="secondary"):
-            if st.button("Επιβεβαίωση: Διαγραφή όλων", width='stretch'):
-                try:
-                    db_execute("DELETE FROM journal")
-                    db_execute("DELETE FROM gl_codes")
+        if "confirm_reset" not in st.session_state:
+            st.session_state.confirm_reset = False
+        
+        if not st.session_state.confirm_reset:
+            if st.button("Διαγραφή ΌΛΩΝ των δεδομένων (Reset DB)", width='stretch', type="secondary"):
+                st.session_state.confirm_reset = True
+                st.rerun()
+        else:
+            st.error("⚠️ Είστε σίγουροι; Θα διαγραφούν ΟΛΑ τα δεδομένα!")
+            col_yes, col_no = st.columns(2)
+            with col_yes:
+                if st.button("✅ Ναι, διαγραφή όλων", width='stretch', type="primary"):
                     try:
-                        db_execute("DELETE FROM counterparties")
-                    except Exception:
-                        pass
-                    try:
-                        db_execute("DELETE FROM bank_accounts")
-                    except Exception:
-                        pass
-                    init_db()
-                    st.error("✗ Η βάση καθαρίστηκε πλήρως!")
-                    st.info("Η εφαρμογή ξανα-αρχικοποίησε τα βασικά GL codes.")
-                    time.sleep(2)
+                        db_execute("DELETE FROM journal")
+                        db_execute("DELETE FROM gl_codes")
+                        try:
+                            db_execute("DELETE FROM counterparties")
+                        except Exception:
+                            pass
+                        try:
+                            db_execute("DELETE FROM bank_accounts")
+                        except Exception:
+                            pass
+                        st.session_state["db_initialized"] = False
+                        init_db()
+                        st.session_state["db_initialized"] = True
+                        st.cache_data.clear()
+                        st.session_state.confirm_reset = False
+                        st.error("✗ Η βάση καθαρίστηκε πλήρως!")
+                        st.info("Η εφαρμογή ξανα-αρχικοποίησε τα βασικά GL codes.")
+                        time.sleep(2)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Σφάλμα: {str(e)}")
+            with col_no:
+                if st.button("❌ Ακύρωση", width='stretch', type="secondary"):
+                    st.session_state.confirm_reset = False
                     st.rerun()
-                except Exception as e:
-                    st.error(f"Σφάλμα: {str(e)}")
         
         st.divider()
         st.write("**Πληροφορίες Συστήματος:**")
