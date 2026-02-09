@@ -923,8 +923,10 @@ def migrate_placeholders_to_lookups() -> None:
         pass
 
 try:
-    init_db()
-    migrate_placeholders_to_lookups()
+    if not st.session_state.get("db_initialized"):
+        init_db()
+        migrate_placeholders_to_lookups()
+        st.session_state["db_initialized"] = True
 except OperationalError:
     st.error("❌ Δεν μπορώ να συνδεθώ στη βάση Postgres (DATABASE_URL).")
     diag = _safe_db_diagnostics()
@@ -2042,12 +2044,7 @@ elif menu == "ΦΠΑ & Φόροι (Report)":
 elif menu == "Καρτέλες (Ledgers)":
     st.title("📇 Καρτέλες Συναλλασσομένων")
 
-    partners_df = pd.read_sql_query(
-        "SELECT DISTINCT counterparty FROM journal WHERE counterparty IS NOT NULL AND counterparty != ''",
-        ENGINE,
-    )
-    partners = partners_df['counterparty'].tolist()
-    partners.sort()
+    partners = load_counterparties(None)
     
     if not partners:
         st.warning("⚠️ Δεν υπάρχουν καταχωρημένοι συναλλασσόμενοι")
@@ -2058,11 +2055,9 @@ elif menu == "Καρτέλες (Ledgers)":
     sel = st.selectbox("Επιλογή Συναλλασσόμενου", partners, help="Επιλέξτε τον συναλλασσόμενο για να δείτε τις συναλλαγές του")
     
     if sel:
-        df = pd.read_sql_query(
-            text("SELECT * FROM journal WHERE counterparty = :counterparty ORDER BY doc_date DESC"),
-            ENGINE,
-            params={"counterparty": sel},
-        )
+        df_all = load_journal_data()
+        mask = df_all["counterparty"].fillna("").astype(str).str.strip() == sel
+        df = df_all[mask].copy()
         
         # Convert date and clean data
         df['doc_date'] = pd.to_datetime(df['doc_date'], errors='coerce')
@@ -2090,6 +2085,7 @@ elif menu == "Καρτέλες (Ledgers)":
             mask = mask & (df['doc_type'].isin(doc_type_filter))
         
         df_filtered = df[mask].copy()
+        df_filtered = df_filtered.sort_values("doc_date", ascending=False)
         
         # Ensure all numeric columns are properly formatted
         for col in ['amount_net', 'vat_amount', 'amount_gross']:
@@ -2171,7 +2167,7 @@ elif menu == "Αρχείο & Διορθώσεις":
     st.title("📚 Αρχείο & Διορθώσεις")
 
     with st.spinner("Φόρτωση αρχείου..."):
-        df = pd.read_sql_query("SELECT id, * FROM journal ORDER BY doc_date DESC", ENGINE)
+        df = load_journal_data()
     
     if df.empty:
         st.info("📭 Δεν υπάρχουν καταχωρήσεις στο αρχείο")
