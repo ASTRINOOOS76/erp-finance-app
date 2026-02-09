@@ -2067,11 +2067,13 @@ elif menu == "Καρτέλες (Ledgers)":
         col1, col2, col3 = st.columns(3)
         with col1:
             min_date = df['doc_date'].min()
-            start_date = st.date_input("Από", value=min_date, help="Ημερομηνία έναρξης")
+            start_default = date.today() if pd.isna(min_date) else min_date.date()
+            start_date = st.date_input("Από", value=start_default, help="Ημερομηνία έναρξης")
         
         with col2:
             max_date = df['doc_date'].max()
-            end_date = st.date_input("Ως", value=max_date, help="Ημερομηνία λήξης")
+            end_default = date.today() if pd.isna(max_date) else max_date.date()
+            end_date = st.date_input("Ως", value=end_default, help="Ημερομηνία λήξης")
         
         with col3:
             doc_type_filter = st.multiselect("Τύπος Συναλλαγής", 
