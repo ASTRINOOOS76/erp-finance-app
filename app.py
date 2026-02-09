@@ -2059,7 +2059,7 @@ elif menu == "Καρτέλες (Ledgers)":
     
     if sel:
         df = pd.read_sql_query(
-            "SELECT * FROM journal WHERE counterparty = :counterparty ORDER BY doc_date DESC",
+            text("SELECT * FROM journal WHERE counterparty = :counterparty ORDER BY doc_date DESC"),
             ENGINE,
             params={"counterparty": sel},
         )
