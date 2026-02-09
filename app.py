@@ -2056,24 +2056,38 @@ elif menu == "Καρτέλες (Ledgers)":
     
     if sel:
         df_all = load_journal_data()
-        mask = df_all["counterparty"].fillna("").astype(str).str.strip() == sel
+        counterparty_series = df_all["counterparty"].fillna("").astype(str).str.strip()
+        sel_norm = str(sel).strip().casefold()
+        mask = counterparty_series.str.casefold() == sel_norm
         df = df_all[mask].copy()
+        if df.empty:
+            st.warning("⚠️ Δεν υπάρχουν συναλλαγές για τον επιλεγμένο συναλλασσόμενο")
+            st.stop()
         
         # Convert date and clean data
         df['doc_date'] = pd.to_datetime(df['doc_date'], errors='coerce')
         df = clean_dataframe(df)
         
         # Date filters
+        has_dates = df['doc_date'].notna().any()
         col1, col2, col3 = st.columns(3)
         with col1:
-            min_date = df['doc_date'].min()
-            start_default = date.today() if pd.isna(min_date) else min_date.date()
-            start_date = st.date_input("Από", value=start_default, help="Ημερομηνία έναρξης")
+            if has_dates:
+                min_date = df['doc_date'].min()
+                start_default = date.today() if pd.isna(min_date) else min_date.date()
+                start_date = st.date_input("Από", value=start_default, help="Ημερομηνία έναρξης")
+            else:
+                st.caption("Δεν υπάρχουν έγκυρες ημερομηνίες")
+                start_date = date.today()
         
         with col2:
-            max_date = df['doc_date'].max()
-            end_default = date.today() if pd.isna(max_date) else max_date.date()
-            end_date = st.date_input("Ως", value=end_default, help="Ημερομηνία λήξης")
+            if has_dates:
+                max_date = df['doc_date'].max()
+                end_default = date.today() if pd.isna(max_date) else max_date.date()
+                end_date = st.date_input("Ως", value=end_default, help="Ημερομηνία λήξης")
+            else:
+                st.caption("-")
+                end_date = date.today()
         
         with col3:
             doc_type_filter = st.multiselect("Τύπος Συναλλαγής", 
@@ -2082,7 +2096,10 @@ elif menu == "Καρτέλες (Ledgers)":
                                             help="Επιλέξτε τύπους συναλλαγών προς εμφάνιση")
         
         # Apply date filter
-        mask = (df['doc_date'].dt.date >= start_date) & (df['doc_date'].dt.date <= end_date)
+        if has_dates:
+            mask = (df['doc_date'].dt.date >= start_date) & (df['doc_date'].dt.date <= end_date)
+        else:
+            mask = pd.Series(True, index=df.index)
         if doc_type_filter:
             mask = mask & (df['doc_type'].isin(doc_type_filter))
         
