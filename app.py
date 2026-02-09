@@ -2072,16 +2072,14 @@ elif menu == "Καρτέλες (Ledgers)":
         has_dates = df['doc_date'].notna().any()
         col1, col2, col3 = st.columns(3)
         with col1:
-            if has_dates:
-                min_date = df['doc_date'].min()
-                start_default = date.today() if pd.isna(min_date) else min_date.date()
-                start_date = st.date_input("Από", value=start_default, help="Ημερομηνία έναρξης")
+            min_date = df['doc_date'].min()
+            start_default = date.today() if pd.isna(min_date) else min_date.date()
+            start_date = st.date_input("Από", value=start_default, help="Ημερομηνία έναρξης")
         
         with col2:
-            if has_dates:
-                max_date = df['doc_date'].max()
-                end_default = date.today() if pd.isna(max_date) else max_date.date()
-                end_date = st.date_input("Ως", value=end_default, help="Ημερομηνία λήξης")
+            max_date = df['doc_date'].max()
+            end_default = date.today() if pd.isna(max_date) else max_date.date()
+            end_date = st.date_input("Ως", value=end_default, help="Ημερομηνία λήξης")
         
         with col3:
             doc_types = (
@@ -2094,6 +2092,11 @@ elif menu == "Καρτέλες (Ledgers)":
                 {t for t in doc_types.unique() if t and t.casefold() not in {"nan", "none", "<na>"}},
                 key=str.casefold,
             )
+            base_types = ["Income", "Expense", "Bill", "Transfer"]
+            for t in base_types:
+                if t not in doc_type_options:
+                    doc_type_options.append(t)
+            doc_type_options = sorted(set(doc_type_options), key=str.casefold)
             doc_type_filter = st.multiselect(
                 "Τύπος Συναλλαγής",
                 doc_type_options,
